@@ -142,10 +142,47 @@ md"""
 
 ### Codecs
 
+The next idea we'll introduce (and one that's key to the separation of concerns within the Chemellia framework) is that of Codecs, or "encoder-decoders." The key insight behind Codecs is that the actual value of a feature is entirely distinct from the way it is encoded in order to be passed into a model, and in fact, often one might want to encode the same feature in multiple distinct ways for different applications. In addition, often the encoded version of a feature is substantially less human-readable than its actual value.
+
+As one example, 
 """
 
 # ╔═╡ 175f5541-1929-4d2f-aca0-82be15890738
 
+
+# ╔═╡ 4b5da3b1-3c13-43ac-bb3f-952420f450d1
+
+
+# ╔═╡ 78791a9e-9537-4d66-9609-d470c90c675e
+md"""
+### Featurization Objects
+
+...these store FD's and associated codecs and typically live in a separate repository, or in the one for the model that uses them. Example: GraphNodeFeautrization in AtomicGraphNets
+"""
+
+# ╔═╡ 6ae1ed8e-603a-4828-a562-1361516ec9ab
+
+
+# ╔═╡ 6bf7dd34-d1f3-4145-ac95-069886c8a850
+md"""
+## Model Building, Evaluation, and Training
+again, using AtomicGraphNets as the example here
+"""
+
+# ╔═╡ 41ffa75e-c0cb-4d76-803f-48553db8f626
+
+
+# ╔═╡ 58656c12-d6b3-42bb-ba58-f1d283f98614
+
+
+# ╔═╡ 04106bba-7302-4e93-aecd-73a14d0aea03
+
+
+# ╔═╡ c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
+md"""
+### More Interoperability!
+layer sharing with GF (see other repo)
+"""
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1533,5 +1570,13 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═bef802d7-9715-4c11-bb73-de2949cbc0fc
 # ╠═fc4625bb-9b16-4fc8-8b8e-175758115aeb
 # ╠═175f5541-1929-4d2f-aca0-82be15890738
+# ╠═4b5da3b1-3c13-43ac-bb3f-952420f450d1
+# ╠═78791a9e-9537-4d66-9609-d470c90c675e
+# ╠═6ae1ed8e-603a-4828-a562-1361516ec9ab
+# ╠═6bf7dd34-d1f3-4145-ac95-069886c8a850
+# ╠═41ffa75e-c0cb-4d76-803f-48553db8f626
+# ╠═58656c12-d6b3-42bb-ba58-f1d283f98614
+# ╠═04106bba-7302-4e93-aecd-73a14d0aea03
+# ╠═c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

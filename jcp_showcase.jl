@@ -285,11 +285,13 @@ This mechanism ensures that we have the sufficient data (and metadata) required 
 """
 
 # ╔═╡ 15d31f64-8d36-4b85-bb11-cd80b111b781
-# somewhere we need this line since it will be used a few times below:
 fg = featurize(HoPt₃, fzn)
 
-# ╔═╡ 66af0ad2-aea8-4416-8627-c0f29384c7da
+# ╔═╡ 9dbff198-c067-4252-9673-450844810116
+md"""We can `decode` a `FeaturizedAtoms` object as a single argument, since it has everything that's needed..."""
 
+# ╔═╡ 66af0ad2-aea8-4416-8627-c0f29384c7da
+decode(fg)
 
 # ╔═╡ c0241b9c-77d1-47a0-9eb5-d65e7036e69c
 md"""
@@ -311,24 +313,49 @@ md"""This can be applied directly to our featurized graph from above. The output
 la(fg)
 
 # ╔═╡ c81bd54d-c1de-44a5-b586-601310463be4
+md"""We can apply it multiple times, too..."""
+
+# ╔═╡ 82bad2b4-4598-436e-811b-fb19c9a69c9f
+la(la(fg))
+
+# ╔═╡ def924ff-4e46-4670-9f4b-112a1bf243d1
+md"""Or chain multiple of them together with different sized latent spaces... (`Chain` is just Flux.jl shorthand for function composition)"""
+
+# ╔═╡ 4f860da9-22d2-4e4b-8fa5-e9f9797039cb
+begin
+	c = Chain(la, AGNConv(14=>10), AGNConv(10=>6))
+	c(fg)
+end
+
+# ╔═╡ 5e374c75-5fc1-4407-a667-33b1e79553a3
+md"""But to build a full model, we need some other layers, too -- note that the output size of a convolutional layer will depend on the size of the input graph. We can use a *pooling* layer to get to a predictable output size. The `AGNPool` layer will apply a specified pooling function (for example, maximum or average) across nodes and reduce along the features (dim, stride, and pad will be automatically computed from the desired input and output sizes and a target ratio between dim and feature length) to get to the desired output dimensions:"""
+
+# ╔═╡ bc5bc9a7-3e5a-47bb-bd86-bac74208df39
+c2 = Chain(c, AGNPool("mean", 6, 3, 0.4))
+
+# ╔═╡ e7a82f17-ed97-48e2-a8f4-95cb6b65a7ce
+c2(fg) # output now will always be 3 x 1
+
+# ╔═╡ 92ef3b47-c050-4a1b-bebf-11d09be0665a
+md"""We can of course build up entire models "from scratch" in this way. However, AtomicGraphNets also includes some convenience functions for standard types of architectures. One of these is `build_CGCNN`, which will build a model similar to those in cgcnn.py. """
+
+# ╔═╡ e6bc074f-f68f-4285-b058-7e2f6c665663
+# build_CGCNN
+
+# ╔═╡ 5da42259-19c8-40c8-9b8f-958a2b28d44b
 
 
 # ╔═╡ 41ffa75e-c0cb-4d76-803f-48553db8f626
-# show building up a model "from scratch" and easy inspection of layers
-# show convenience constructor for "typical" architectures within AGN
-# show running a forward and backward pass on structures from above
+
 
 # ╔═╡ 89d4f52f-54bb-4847-915d-b991e9d57f9b
 
 
 # ╔═╡ 58656c12-d6b3-42bb-ba58-f1d283f98614
-# if time, maybe include some benchmarking against cgcnn.py here, and/or in main manuscript
+
 
 # ╔═╡ 04106bba-7302-4e93-aecd-73a14d0aea03
 
-
-# ╔═╡ 3fab6bb3-e923-40e5-9ff9-438564462161
-la.selfweight
 
 # ╔═╡ c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 md"""
@@ -376,7 +403,7 @@ lg(fg)
 # ╔═╡ 1d199188-384a-4836-a051-b93b7d75ca86
 md"""...and also for a chained combination of layers..."""
 
-# ╔═╡ 62b1cea7-2727-410a-b814-e003afad56b6
+# ╔═╡ 43609597-d5e3-454b-af6b-abb7f01a91ea
 m = Chain(la, lg)
 
 # ╔═╡ 0adcca11-bbca-42ca-ba38-3e7ffee703cc
@@ -2708,17 +2735,26 @@ version = "17.4.0+0"
 # ╟─6bf7dd34-d1f3-4145-ac95-069886c8a850
 # ╠═3bedaca0-d74b-4fa2-b910-593c8603ee33
 # ╠═15d31f64-8d36-4b85-bb11-cd80b111b781
+# ╟─9dbff198-c067-4252-9673-450844810116
 # ╠═66af0ad2-aea8-4416-8627-c0f29384c7da
 # ╟─c0241b9c-77d1-47a0-9eb5-d65e7036e69c
 # ╠═53f83fcb-50e7-4d32-ab69-56fe4e54f425
 # ╟─2d0393dc-8083-4fe9-9d5f-e9cd76af243f
 # ╠═8d619f4c-beea-4917-8f71-49dd7bc82501
-# ╠═c81bd54d-c1de-44a5-b586-601310463be4
+# ╟─c81bd54d-c1de-44a5-b586-601310463be4
+# ╠═82bad2b4-4598-436e-811b-fb19c9a69c9f
+# ╟─def924ff-4e46-4670-9f4b-112a1bf243d1
+# ╠═4f860da9-22d2-4e4b-8fa5-e9f9797039cb
+# ╟─5e374c75-5fc1-4407-a667-33b1e79553a3
+# ╠═bc5bc9a7-3e5a-47bb-bd86-bac74208df39
+# ╠═e7a82f17-ed97-48e2-a8f4-95cb6b65a7ce
+# ╠═92ef3b47-c050-4a1b-bebf-11d09be0665a
+# ╠═e6bc074f-f68f-4285-b058-7e2f6c665663
+# ╠═5da42259-19c8-40c8-9b8f-958a2b28d44b
 # ╠═41ffa75e-c0cb-4d76-803f-48553db8f626
 # ╠═89d4f52f-54bb-4847-915d-b991e9d57f9b
 # ╠═58656c12-d6b3-42bb-ba58-f1d283f98614
 # ╠═04106bba-7302-4e93-aecd-73a14d0aea03
-# ╠═3fab6bb3-e923-40e5-9ff9-438564462161
 # ╟─c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 # ╠═7234d025-4a70-4d55-a199-1c26c45ddd23
 # ╠═b22e0107-c5fc-43e1-bcb3-cd39a66b0732
@@ -2734,7 +2770,7 @@ version = "17.4.0+0"
 # ╠═783d0cea-fa78-4e03-900d-63b2cfe72a9f
 # ╠═1744c053-a7be-47b3-a43e-ba892f47a11f
 # ╟─1d199188-384a-4836-a051-b93b7d75ca86
-# ╠═62b1cea7-2727-410a-b814-e003afad56b6
+# ╠═43609597-d5e3-454b-af6b-abb7f01a91ea
 # ╠═0adcca11-bbca-42ca-ba38-3e7ffee703cc
 # ╟─60394155-ba71-450e-93b2-8123b487561d
 # ╠═c5ca6518-a34b-4990-aca7-6e2ff157eb5a

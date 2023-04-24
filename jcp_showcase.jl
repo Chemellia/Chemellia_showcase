@@ -206,12 +206,11 @@ We will have to define the encoding and decoding mechanism, and we can simply us
 # ╔═╡ dd814c0a-e9d5-4749-bf8a-cb25cd7b0cab
 scaling_codec = SimpleCodec(x -> 2x, x -> x/2)
 
-
 # ╔═╡ af296313-5ac4-4763-977f-c08064927007
 scaling_encoded_amu = encode(amu(HoPt₃), scaling_codec)
 
 # ╔═╡ 71607db5-64cf-4c05-b7ae-ac7f0a7f31a6
-map(x -> decode(x, custom_codec), custom_encoded_amu)
+map(x -> decode(x, scaling_codec), scaling_encoded_amu)
 
 # ╔═╡ 4d7c27c9-6540-4165-8fea-fbae95cdcca4
 md"""
@@ -257,7 +256,7 @@ encodable_elements(fzn_custom) # just the ones that awesomeness can encode
 md"""Finally, for ultimate tweakability, we can also feed in our own codecs, too!"""
 
 # ╔═╡ 8686925b-5e74-43dd-9f55-afbf9fbef1de
-# TODO: use codecs Anant constructs above for this example
+fzn_morecustom = GraphNodeFeaturization([block, amu], [ohoc_block, ohoc_amu])
 
 # ╔═╡ 6ae1ed8e-603a-4828-a562-1361516ec9ab
 md"""Now let's see how we actually encode a featurization. Internally, what this function will do is call the `encode` method for each feature and then combine the results in the way specified for that featurization type. In the case of `GraphNodeFeaturization`, that simply means a concatenation."""
@@ -296,21 +295,40 @@ fg = featurize(HoPt₃, fzn)
 md"""
 ### AtomicGraphNets layers and models
 AtomicGraphNets provides a number of standard layers for operations such as graph convolution and pooling, as well as interfacing seamlessly with layers provided by Flux.jl.
+
+The "workhorse" layer is the graph convolutional layer, `AGNConv`. Its action is to perform a graph convolution (using the graph Laplacian stored in the `AtomGraph` object). This is multiplied by the `convweight` matrix, added to the original input features multiplied by the `selfweight` matrix, and finally, the `bias` is added element-wise to give the final output.
+
+We can construct one as follows, feeding the desired input and output node feature vector lengths:
 """
+
+# ╔═╡ 53f83fcb-50e7-4d32-ab69-56fe4e54f425
+la = AGNConv(14=>14)
+
+# ╔═╡ 2d0393dc-8083-4fe9-9d5f-e9cd76af243f
+md"""This can be applied directly to our featurized graph from above. The output is a copy of the graph Laplacian as well as the output feature matrix (i.e. the node feature vectors concatenated together). The Laplacian is ``passed through'' so that the full `FeaturizedAtoms` object doesn't need to be."""
+
+# ╔═╡ 8d619f4c-beea-4917-8f71-49dd7bc82501
+la(fg)
+
+# ╔═╡ c81bd54d-c1de-44a5-b586-601310463be4
+
 
 # ╔═╡ 41ffa75e-c0cb-4d76-803f-48553db8f626
 # show building up a model "from scratch" and easy inspection of layers
 # show convenience constructor for "typical" architectures within AGN
 # show running a forward and backward pass on structures from above
 
+# ╔═╡ 89d4f52f-54bb-4847-915d-b991e9d57f9b
+
+
 # ╔═╡ 58656c12-d6b3-42bb-ba58-f1d283f98614
 # if time, maybe include some benchmarking against cgcnn.py here, and/or in main manuscript
 
 # ╔═╡ 04106bba-7302-4e93-aecd-73a14d0aea03
-la = AGNConv(14=>14)
+
 
 # ╔═╡ 3fab6bb3-e923-40e5-9ff9-438564462161
-
+la.selfweight
 
 # ╔═╡ c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 md"""
@@ -418,8 +436,9 @@ PlutoUI = "~0.7.50"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.7.1"
+julia_version = "1.8.5"
 manifest_format = "2.0"
+project_hash = "47d99e87e555aba8f1ea2e3d52127b6637dfd9f2"
 
 [[deps.ASEconvert]]
 deps = ["AtomsBase", "CondaPkg", "PeriodicTable", "PythonCall", "Unitful", "UnitfulAtomic"]
@@ -458,6 +477,7 @@ version = "2.3.0"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
+version = "1.1.1"
 
 [[deps.ArnoldiMethod]]
 deps = ["LinearAlgebra", "Random", "StaticArrays"]
@@ -732,6 +752,7 @@ version = "4.6.1"
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+version = "1.0.1+0"
 
 [[deps.Compose]]
 deps = ["Base64", "Colors", "DataStructures", "Dates", "IterTools", "JSON", "LinearAlgebra", "Measures", "Printf", "Random", "Requires", "Statistics", "UUIDs"]
@@ -908,8 +929,9 @@ uuid = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 version = "0.5.15"
 
 [[deps.Downloads]]
-deps = ["ArgTools", "LibCURL", "NetworkOptions"]
+deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+version = "1.6.0"
 
 [[deps.DualNumbers]]
 deps = ["Calculus", "NaNMath", "SpecialFunctions"]
@@ -1461,10 +1483,12 @@ version = "1.0.0"
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
 uuid = "b27032c2-a3e7-50c8-80cd-2d36dbcbfd21"
+version = "0.6.3"
 
 [[deps.LibCURL_jll]]
 deps = ["Artifacts", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Zlib_jll", "nghttp2_jll"]
 uuid = "deac9b47-8bc7-5906-a0fe-35ac56dc84c0"
+version = "7.84.0+0"
 
 [[deps.LibGit2]]
 deps = ["Base64", "NetworkOptions", "Printf", "SHA"]
@@ -1473,6 +1497,7 @@ uuid = "76f85450-5226-5b5a-8eaa-529ad045b433"
 [[deps.LibSSH2_jll]]
 deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
 uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
+version = "1.10.2+0"
 
 [[deps.Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
@@ -1613,6 +1638,7 @@ version = "1.1.7"
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
+version = "2.28.0+0"
 
 [[deps.Measures]]
 git-tree-sha1 = "c13304c81eec1ed3af7fc20e75fb6b26092a1102"
@@ -1660,6 +1686,7 @@ version = "0.3.4"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
+version = "2022.2.1"
 
 [[deps.MuladdMacro]]
 git-tree-sha1 = "cac9cc5499c25554cba55cd3c30543cff5ca4fab"
@@ -1716,6 +1743,7 @@ version = "0.4.13"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+version = "1.2.0"
 
 [[deps.NonlinearSolve]]
 deps = ["ArrayInterface", "DiffEqBase", "EnumX", "FiniteDiff", "ForwardDiff", "LinearAlgebra", "LinearSolve", "RecursiveArrayTools", "Reexport", "SciMLBase", "SimpleNonlinearSolve", "SnoopPrecompile", "SparseArrays", "SparseDiffTools", "StaticArraysCore", "UnPack"]
@@ -1749,10 +1777,12 @@ version = "0.2.3"
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+version = "0.3.20+0"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+version = "0.8.1+0"
 
 [[deps.OpenSSL]]
 deps = ["BitFlags", "Dates", "MozillaCACerts_jll", "OpenSSL_jll", "Sockets"]
@@ -1798,6 +1828,7 @@ version = "6.50.0"
 [[deps.PCRE2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
+version = "10.40.0+0"
 
 [[deps.PDMats]]
 deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
@@ -1856,6 +1887,7 @@ version = "0.40.1+0"
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+version = "1.8.0"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
@@ -2035,6 +2067,7 @@ version = "0.5.6"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+version = "0.7.0"
 
 [[deps.SIMDTypes]]
 git-tree-sha1 = "330289636fb8107c5f32088d2741e9fd7a061a5c"
@@ -2272,6 +2305,7 @@ uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 [[deps.SuiteSparse_jll]]
 deps = ["Artifacts", "Libdl", "Pkg", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
+version = "5.10.1+0"
 
 [[deps.Sundials]]
 deps = ["CEnum", "DataStructures", "DiffEqBase", "Libdl", "LinearAlgebra", "Logging", "Reexport", "SciMLBase", "SnoopPrecompile", "SparseArrays", "Sundials_jll"]
@@ -2294,6 +2328,7 @@ version = "0.2.2"
 [[deps.TOML]]
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.0"
 
 [[deps.TableTraits]]
 deps = ["IteratorInterfaceExtensions"]
@@ -2310,6 +2345,7 @@ version = "1.10.1"
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
+version = "1.10.1"
 
 [[deps.TensorCore]]
 deps = ["LinearAlgebra"]
@@ -2527,9 +2563,9 @@ version = "1.4.0+3"
 
 [[deps.Xtals]]
 deps = ["AtomsBase", "Bio3DView", "CSV", "DataFrames", "Graphs", "JLD2", "LinearAlgebra", "MetaGraphs", "PeriodicTable", "PrecompileSignatures", "Printf", "StaticArrays", "Unitful"]
-git-tree-sha1 = "21e6b308f424ab9962cd5456448be36bdea831e1"
+git-tree-sha1 = "d69026aafd0b8924b0aca2115a3b97af69eb6a56"
 uuid = "ede5f01d-793e-4c47-9885-c447d1f18d6d"
-version = "0.4.13"
+version = "0.4.12"
 
 [[deps.YAML]]
 deps = ["Base64", "Dates", "Printf", "StringEncodings"]
@@ -2546,6 +2582,7 @@ version = "0.10.1"
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+version = "1.2.12+3"
 
 [[deps.Zygote]]
 deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "Requires", "SnoopPrecompile", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
@@ -2574,6 +2611,7 @@ version = "0.1.0+0"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+version = "5.1.1+0"
 
 [[deps.libcleri_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "PCRE2_jll", "Pkg"]
@@ -2602,10 +2640,12 @@ version = "1.4.1+0"
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
+version = "1.48.0+0"
 
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
+version = "17.4.0+0"
 """
 
 # ╔═╡ Cell order:
@@ -2669,8 +2709,13 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═3bedaca0-d74b-4fa2-b910-593c8603ee33
 # ╠═15d31f64-8d36-4b85-bb11-cd80b111b781
 # ╠═66af0ad2-aea8-4416-8627-c0f29384c7da
-# ╠═c0241b9c-77d1-47a0-9eb5-d65e7036e69c
+# ╟─c0241b9c-77d1-47a0-9eb5-d65e7036e69c
+# ╠═53f83fcb-50e7-4d32-ab69-56fe4e54f425
+# ╟─2d0393dc-8083-4fe9-9d5f-e9cd76af243f
+# ╠═8d619f4c-beea-4917-8f71-49dd7bc82501
+# ╠═c81bd54d-c1de-44a5-b586-601310463be4
 # ╠═41ffa75e-c0cb-4d76-803f-48553db8f626
+# ╠═89d4f52f-54bb-4847-915d-b991e9d57f9b
 # ╠═58656c12-d6b3-42bb-ba58-f1d283f98614
 # ╠═04106bba-7302-4e93-aecd-73a14d0aea03
 # ╠═3fab6bb3-e923-40e5-9ff9-438564462161

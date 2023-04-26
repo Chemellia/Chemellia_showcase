@@ -23,6 +23,9 @@ end
 # ╔═╡ 7234d025-4a70-4d55-a199-1c26c45ddd23
 using GeometricFlux
 
+# ╔═╡ 6477ee24-b8c7-4e48-8fc8-e16097d35e67
+using LinearAlgebra
+
 # ╔═╡ 95450e24-a1a3-11ed-2b36-c9ef4bfe3dd0
 md"""
 # Chemellia Showcase!
@@ -426,6 +429,21 @@ md"""...and check that it works."""
 # ╔═╡ 35603fa9-254d-4e74-a2d3-d1a72a593107
 tk = TopKPool(fg.atoms.graph.weights, 8, 10) # adjacency matrix, k, input size
 
+# ╔═╡ 020c01b7-9896-47da-bdd2-50a809048729
+X = m(fg)[2]'
+
+# ╔═╡ d40b0d4b-ef0b-4ee3-9963-3201fe23a54e
+y = tk.p' * X / norm(tk.p)
+
+# ╔═╡ 7070fbd6-5e42-478d-9cad-1a4286ff1c39
+idx = GeometricFlux.topk_index(y, tk.k)
+
+# ╔═╡ 6e71c610-498b-4102-a0cd-23188b064f97
+Atilde = view(tk.A, idx, idx)
+
+# ╔═╡ 5d1c00df-bde0-4408-9d0a-5fb7c43a61ba
+view(X, : , idx) .* σ.(view(y, idx)')
+
 # ╔═╡ 68c64be8-2664-4c24-8e90-939e94102aea
 m2 = Chain(la, lg, tk)
 
@@ -444,6 +462,7 @@ DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GeometricFlux = "7e08b658-56d3-11e9-2997-919d5b31e4ea"
 GraphSignals = "3ebe565e-a4b5-49c6-aed2-300248c3a9c1"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 
 [compat]
@@ -465,7 +484,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.5"
 manifest_format = "2.0"
-project_hash = "47d99e87e555aba8f1ea2e3d52127b6637dfd9f2"
+project_hash = "76810e8c30df14367a29fc130c09f4494242271b"
 
 [[deps.ASEconvert]]
 deps = ["AtomsBase", "CondaPkg", "PeriodicTable", "PythonCall", "Unitful", "UnitfulAtomic"]
@@ -2776,6 +2795,12 @@ version = "17.4.0+0"
 # ╠═c5ca6518-a34b-4990-aca7-6e2ff157eb5a
 # ╟─d3d149fd-6652-444e-83fa-0701162f947a
 # ╠═35603fa9-254d-4e74-a2d3-d1a72a593107
+# ╠═020c01b7-9896-47da-bdd2-50a809048729
+# ╠═6477ee24-b8c7-4e48-8fc8-e16097d35e67
+# ╠═d40b0d4b-ef0b-4ee3-9963-3201fe23a54e
+# ╠═7070fbd6-5e42-478d-9cad-1a4286ff1c39
+# ╠═6e71c610-498b-4102-a0cd-23188b064f97
+# ╠═5d1c00df-bde0-4408-9d0a-5fb7c43a61ba
 # ╠═68c64be8-2664-4c24-8e90-939e94102aea
 # ╠═52f90156-7640-4e74-86f0-6d352475818d
 # ╟─00000000-0000-0000-0000-000000000001

@@ -218,7 +218,13 @@ We can also use a `DirectCodec` to perform a scaling operation.
 """
 
 # ╔═╡ a7260180-244c-4600-bd89-72e7bc857544
+direct_scaling_codec = DirectCodec(2) # to scale by 2
 
+# ╔═╡ 789480db-6ad6-45fd-bc2f-8181cbd274a8
+direct_scaling_encoded_amu = encode(amu(HoPt₃), direct_scaling_codec)
+
+# ╔═╡ c2d96ebe-f082-4cbb-96c3-d3a04114608d
+map(x -> decode(x, direct_scaling_codec), direct_scaling_encoded_amu)
 
 # ╔═╡ 78791a9e-9537-4d66-9609-d470c90c675e
 md"""
@@ -2687,7 +2693,7 @@ version = "17.4.0+0"
 # ╠═10d1afae-6bf4-4914-bfaa-43f02e956c4b
 # ╟─f7a6ae01-2e6d-4c16-aaf8-9af17a0e59e8
 # ╟─578e1a80-9499-42db-8ed3-da1e0713e604
-# ╟─c20fb391-1765-4b29-9eb8-7f2c8f4351bf
+# ╠═c20fb391-1765-4b29-9eb8-7f2c8f4351bf
 # ╟─7e3ad6e5-323b-4e29-ba58-6c243a416ea9
 # ╟─660b7b62-8edf-4bdc-9d6c-c1b46002590c
 # ╠═a55da127-e349-42fe-9280-e1c868c025f7
@@ -2719,6 +2725,8 @@ version = "17.4.0+0"
 # ╠═71607db5-64cf-4c05-b7ae-ac7f0a7f31a6
 # ╠═4d7c27c9-6540-4165-8fea-fbae95cdcca4
 # ╠═a7260180-244c-4600-bd89-72e7bc857544
+# ╠═789480db-6ad6-45fd-bc2f-8181cbd274a8
+# ╠═c2d96ebe-f082-4cbb-96c3-d3a04114608d
 # ╟─78791a9e-9537-4d66-9609-d470c90c675e
 # ╠═d2d30fca-8914-4853-ba20-32f50244be01
 # ╟─26ac75f4-bab7-47e7-aad9-c6fa9e031737

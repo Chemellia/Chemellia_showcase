@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.22
+# v0.19.16
 
 using Markdown
 using InteractiveUtils
@@ -16,8 +16,26 @@ end
 
 # ╔═╡ 03e3c34f-f43e-4bf8-bc39-c66dd9059c0e
 begin
-	using PlutoUI, AtomsBase, AtomsIO, AtomGraphs, AtomicGraphNets, ChemistryFeaturization, DataFrames, Flux
-	using ChemistryFeaturization.ElementFeature
+	using DataFrames, Flux, PlutoUI, Test
+	using AtomsBase, AtomsIO
+	using AtomGraphs, AtomicGraphNets, ChemistryFeaturization
+end
+
+# ╔═╡ 10a99c8e-2ef5-43f7-a82f-0f7dc30e2d6d
+# If the notebook is being run on JuliaHub, first retrieve the dataset assets required for running the notebook.
+if haskey(ENV, "JULIAHUB_APP_URL")
+	begin
+		using JuliaHubData, DataSets
+		datasets = ["mp-195", "VInO4"]
+		for structure in datasets
+			open(IO, dataset("thazhemadam/$(structure)")) do io
+				write("$(structure).cif", io)
+			end
+			open(IO, dataset("thazhemadam/$(structure)-image")) do io
+				write("$(structure).png", io)
+			end
+		end
+	end
 end
 
 # ╔═╡ 7234d025-4a70-4d55-a199-1c26c45ddd23
@@ -72,7 +90,7 @@ cutoff_slider = @bind cutoff Scrubbable(2.75:0.25:4, format=".2f")
 
 # ╔═╡ c20fb391-1765-4b29-9eb8-7f2c8f4351bf
 begin
-	VInO₄ = AtomGraph("./VInO4.cif", cutoff_radius=cutoff)
+	VInO₄ = AtomGraph("VInO4.cif", cutoff_radius=cutoff)
 	visualize(VInO₄)
 end
 
@@ -95,7 +113,7 @@ To start, suppose we're interested in featurizing our graphs with information ab
 """
 
 # ╔═╡ a55da127-e349-42fe-9280-e1c868c025f7
-block = ElementFeatureDescriptor("Block")
+block = ElementFeature.ElementFeatureDescriptor("Block")
 
 # ╔═╡ c731b3fc-8b39-40a6-9b75-5e021795a495
 md"""
@@ -116,7 +134,7 @@ md"The ones that just have names of orbitals are the energy levels of those orbi
 
 # ╔═╡ 0656f790-f295-48a5-8a18-f671dd1db925
 begin
-	sixp = ElementFeatureDescriptor("6p")
+	sixp = ElementFeature.ElementFeatureDescriptor("6p")
 	encodable_elements(sixp)
 end
 
@@ -130,14 +148,14 @@ We can also easily define custom features. For an `ElementFeatureDescriptor`, al
 # ╔═╡ b73dc3d3-ee38-46c7-a268-e47c0d692c9a
 begin
 	lookup_table = DataFrame(["Ho" 73; "Pt" 92; "In" 126; "V" 40], [:Symbol, :Awesomeness])
-	awesomeness = ElementFeatureDescriptor("Awesomeness", lookup_table)
+	awesomeness = ElementFeature.ElementFeatureDescriptor("Awesomeness", lookup_table)
 end
 
 # ╔═╡ 87aedd6e-9af1-442d-93bd-6b1a45838315
 awesomeness(HoPt₃)
 
 # ╔═╡ bef802d7-9715-4c11-bb73-de2949cbc0fc
-awesomeness(VInO₄_smallcutoff)
+@test_throws AssertionError awesomeness(VInO₄) # The awesomeness feature isn't defined for VInO₄!
 
 # ╔═╡ fc4625bb-9b16-4fc8-8b8e-175758115aeb
 md"""
@@ -147,28 +165,28 @@ md"""
 
 The next idea we'll introduce (and one that's key to the separation of concerns within the Chemellia framework) is that of Codecs, or "encoder-decoders." The key insight behind Codecs is that the actual value of a feature is entirely distinct from the way it is encoded in order to be passed into a model, and in fact, often one might want to encode the same feature in multiple distinct ways for different applications. In addition, often the encoded version of a feature is substantially less human-readable than its actual value.
 
+#### OneHotOneCold
+
 As one example, consider the `OneHotOneCold` Codec. As the name suggests, this Codec performs one-hot encoding of a given feature value and decodes using a one-cold decoding scheme.
 
-Remember the `block` feature descriptor from before? We can very easily encode this categorical feature using one-hot encoding.
+##### Categorical Values
+Remember the `block` feature descriptor from before? We can very easily encode and decode this categorical feature using one-hot encoding.
 """
 
 # ╔═╡ 17ab9f6e-abde-453e-aace-b3694eb31f64
-ohoc_block = OneHotOneCold(true, ["s", "p", "d", "f"])
-
-# ╔═╡ 175f5541-1929-4d2f-aca0-82be15890738
-encoded_block = encode(block(HoPt₃), ohoc_block)
-
-# ╔═╡ b959d3ba-83a6-4880-8532-697f58ef3ac2
-md"""
-We can also decode the encoded features to retrieve the original values themselves, using the `decode` method.
-"""
-
-# ╔═╡ 1eb1a96d-a307-47ff-b77c-a1d004a933e0
-map(x -> decode(x, ohoc_block), encoded_block)
-
+begin
+	ohoc_block = OneHotOneCold(true, ["s", "p", "d", "f"])
+	local encoded_block = encode(block(HoPt₃), ohoc_block)
+	local decoded_block = map(x -> decode(x, ohoc_block), encoded_block)
+	@info "Feature" block(HoPt₃)
+	@info "Encoded Feature" encoded_block
+	@info "Decoded Feature" decoded_block
+end
 
 # ╔═╡ 4bdcc41b-083a-4687-aee5-bbc23f94363b
 md"""
+##### Continuous Values
+
 Alright, we've seen that this works for a categorical variable. But, does this also work for continuous values too? Yes, it does!
 
 Let's consider a continuous feature, Atomic mass.
@@ -183,48 +201,59 @@ Let's also define the bins with heuristically selected values, given the range o
 """
 
 # ╔═╡ 19812716-75a9-4e9d-9254-c4629842430e
-ohoc_amu = OneHotOneCold(false, [163, 165, 194, 197])
-
-# ╔═╡ a0286abe-aca7-442d-be1e-0298a38651ff
-encoded_amu = encode(amu(HoPt₃), ohoc_amu)
+begin
+	ohoc_amu = OneHotOneCold(false, [163, 165, 194, 197])
+	local encoded_amu = encode(amu(HoPt₃), ohoc_amu)
+	local decoded_amu = map(x -> decode(x, ohoc_amu), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
 
 # ╔═╡ 658a48c2-8409-4128-88e5-b974fe30701b
 md"""
 As it is with continuous values, after binning, we cannot recover the original values while decoding, only the bins into which the values were decoded themselves.
 """
 
-# ╔═╡ 38f64f77-ff0f-43cc-b7b4-ac9ab38137ac
-decoded_amu = map(x -> decode(x, ohoc_amu), encoded_amu)
-
 # ╔═╡ f995ee00-d7c0-477a-8237-f9ddc1209468
 md"""
-But what if we want to write a custom Codec?
-Let's first check out how we can write a simple Codec that performs a simple scaling and shifting operation, using a `SimpleCodec`!
+#### Simple Codec
+Let's now check out how we can write a simple Codec that performs a simple scaling and shifting operation, using a `SimpleCodec`!
 We will have to define the encoding and decoding mechanism, and we can simply use `encode` and `decode` as we would normally!
 """
 
 # ╔═╡ dd814c0a-e9d5-4749-bf8a-cb25cd7b0cab
-scaling_codec = SimpleCodec(x -> 2x, x -> x/2)
-
-# ╔═╡ af296313-5ac4-4763-977f-c08064927007
-scaling_encoded_amu = encode(amu(HoPt₃), scaling_codec)
-
-# ╔═╡ 71607db5-64cf-4c05-b7ae-ac7f0a7f31a6
-map(x -> decode(x, scaling_codec), scaling_encoded_amu)
+begin
+	local simple = SimpleCodec(x -> 2x, x -> x/2)
+	local encoded_amu = encode(amu(HoPt₃), simple)
+	local decoded_amu = map(x -> decode(x, simple), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
 
 # ╔═╡ 4d7c27c9-6540-4165-8fea-fbae95cdcca4
 md"""
-We can also use a `DirectCodec` to perform a scaling operation.
+#### Direct Codec
+We can also perform the same scaling operation using a `DirectCodec`, which is meant to be used for the same.
 """
 
 # ╔═╡ a7260180-244c-4600-bd89-72e7bc857544
-direct_scaling_codec = DirectCodec(2) # to scale by 2
+begin
+	local direct = DirectCodec(2) # to scale by 2
+	local encoded_amu = encode(amu(HoPt₃), direct)
+	local decoded_amu = map(x -> decode(x, direct), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
 
-# ╔═╡ 789480db-6ad6-45fd-bc2f-8181cbd274a8
-direct_scaling_encoded_amu = encode(amu(HoPt₃), direct_scaling_codec)
-
-# ╔═╡ c2d96ebe-f082-4cbb-96c3-d3a04114608d
-map(x -> decode(x, direct_scaling_codec), direct_scaling_encoded_amu)
+# ╔═╡ 2b5b1ef3-a782-43d5-9f16-20bc8303d67a
+md"""#### Custom Codecs
+But what if we want to write a custom Codec? It's simple! There's only two rules that your custom Codec needs to comply with.
+  * Your custom Codec must be a sub-type of `AbstractCodec`.
+  * Your custom Codec must have an associated `encode` and `decode` mechanism defined.
+"""
 
 # ╔═╡ 78791a9e-9537-4d66-9609-d470c90c675e
 md"""
@@ -447,7 +476,7 @@ As before, we first define the dispatch..."""
 md"""...and check that it works."""
 
 # ╔═╡ 35603fa9-254d-4e74-a2d3-d1a72a593107
-tk = TopKPool(fg.atoms.graph.weights, 2, 10) # adjacency matrix, k, input size
+tk = TopKPool(fg.atoms.graph.weights, 4, 10) # adjacency matrix, k, input size
 
 # ╔═╡ 68c64be8-2664-4c24-8e90-939e94102aea
 m2 = Chain(la, lg, tk)
@@ -464,10 +493,13 @@ AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 AtomsIO = "1692102d-eeb4-4df9-807b-c9517f998d44"
 ChemistryFeaturization = "6c925690-434a-421d-aea7-51398c5b007a"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataSets = "c9661210-8a83-48f0-b833-72e62abce419"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GeometricFlux = "7e08b658-56d3-11e9-2997-919d5b31e4ea"
 GraphSignals = "3ebe565e-a4b5-49c6-aed2-300248c3a9c1"
+JuliaHubData = "e241c0f9-2941-4184-86f1-92558f4420e8"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 AtomGraphs = "~0.1.3"
@@ -476,9 +508,11 @@ AtomsBase = "~0.2.5"
 AtomsIO = "~0.1.2"
 ChemistryFeaturization = "~0.7.1"
 DataFrames = "~1.3.6"
+DataSets = "~0.2.9"
 Flux = "~0.13.13"
 GeometricFlux = "~0.13.8"
 GraphSignals = "~0.8.5"
+JuliaHubData = "~0.3.6"
 PlutoUI = "~0.7.50"
 """
 
@@ -486,14 +520,21 @@ PlutoUI = "~0.7.50"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.7.1"
+julia_version = "1.8.5"
 manifest_format = "2.0"
+project_hash = "dd2c330517a73b5fc5552c0cfecf9cb08a45305a"
 
 [[deps.ASEconvert]]
 deps = ["AtomsBase", "CondaPkg", "PeriodicTable", "PythonCall", "Unitful", "UnitfulAtomic"]
 git-tree-sha1 = "8f62517390341fa47bce341a598aed60d824b14a"
 uuid = "3da9722f-58c2-4165-81be-b4d7253e8fd2"
 version = "0.1.3"
+
+[[deps.AWS]]
+deps = ["Base64", "Compat", "Dates", "Downloads", "GitHub", "HTTP", "IniFile", "JSON", "MbedTLS", "Mocking", "OrderedCollections", "Random", "SHA", "Sockets", "URIs", "UUIDs", "XMLDict"]
+git-tree-sha1 = "8ae44ce9415f2c2c8163258c003460530a6f095b"
+uuid = "fbe9abb3-538b-5e4e-ba9e-bc94f4f92ebc"
+version = "1.82.0"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -506,6 +547,11 @@ deps = ["Pkg"]
 git-tree-sha1 = "8eaf9f1b4921132a4cff3f36a1d9ba923b14a481"
 uuid = "6e696c72-6542-2067-7265-42206c756150"
 version = "1.1.4"
+
+[[deps.AbstractTrees]]
+git-tree-sha1 = "faa260e4cb5aba097a73fab382dd4b5819d8ec8c"
+uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+version = "0.4.4"
 
 [[deps.Accessors]]
 deps = ["Compat", "CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "LinearAlgebra", "MacroTools", "Requires", "StaticArrays", "Test"]
@@ -526,6 +572,7 @@ version = "2.3.0"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
+version = "1.1.1"
 
 [[deps.ArnoldiMethod]]
 deps = ["LinearAlgebra", "Random", "StaticArrays"]
@@ -800,6 +847,7 @@ version = "4.6.1"
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+version = "1.0.1+0"
 
 [[deps.Compose]]
 deps = ["Base64", "Colors", "DataStructures", "Dates", "IterTools", "JSON", "LinearAlgebra", "Measures", "Printf", "Random", "Requires", "Statistics", "UUIDs"]
@@ -868,6 +916,12 @@ deps = ["Compat", "DataAPI", "Future", "InvertedIndices", "IteratorInterfaceExte
 git-tree-sha1 = "db2a9cb664fcea7836da4b414c3278d71dd602d2"
 uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 version = "1.3.6"
+
+[[deps.DataSets]]
+deps = ["AbstractTrees", "Base64", "Markdown", "REPL", "ReplMaker", "ResourceContexts", "SHA", "TOML", "UUIDs"]
+git-tree-sha1 = "bbb3ea880461e62709e8cb181856de19c383e99c"
+uuid = "c9661210-8a83-48f0-b833-72e62abce419"
+version = "0.2.9"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -982,8 +1036,9 @@ uuid = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 version = "0.5.15"
 
 [[deps.Downloads]]
-deps = ["ArgTools", "LibCURL", "NetworkOptions"]
+deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+version = "1.6.0"
 
 [[deps.DualNumbers]]
 deps = ["Calculus", "NaNMath", "SpecialFunctions"]
@@ -1042,6 +1097,12 @@ deps = ["AtomsBase", "PeriodicTable", "StaticArrays", "Unitful", "extxyz_jll"]
 git-tree-sha1 = "9f076bea9ae0475ca87f7bb58db49559c13f9a2a"
 uuid = "352459e4-ddd7-4360-8937-99dcb397b478"
 version = "0.1.9"
+
+[[deps.EzXML]]
+deps = ["Printf", "XML2_jll"]
+git-tree-sha1 = "0fa3b52a04a4e210aeb1626def9c90df3ae65268"
+uuid = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
+version = "1.1.0"
 
 [[deps.FLoops]]
 deps = ["BangBang", "Compat", "FLoopsBase", "InitialValues", "JuliaVariables", "MLStyle", "Serialization", "Setfield", "Transducers"]
@@ -1216,6 +1277,12 @@ git-tree-sha1 = "9b02998aba7bf074d14de89f9d37ca24a1a0b046"
 uuid = "78b55507-aeef-58d4-861c-77aaff3498b1"
 version = "0.21.0+0"
 
+[[deps.GitHub]]
+deps = ["Base64", "Dates", "HTTP", "JSON", "MbedTLS", "Sockets", "SodiumSeal", "URIs"]
+git-tree-sha1 = "5688002de970b9eee14b7af7bbbd1fdac10c9bbe"
+uuid = "bc5e4493-9b4d-5f90-b8aa-2b2bcaad7a26"
+version = "5.8.2"
+
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "d3b3624125c1474292d0d8ed0f65554ac37ddb23"
@@ -1345,6 +1412,11 @@ git-tree-sha1 = "5cd07aab533df5170988219191dfad0519391428"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
 version = "0.1.3"
 
+[[deps.IniFile]]
+git-tree-sha1 = "f550e6e32074c939295eb5ea6de31849ac2c9625"
+uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
+version = "0.5.1"
+
 [[deps.InitialValues]]
 git-tree-sha1 = "4da0f88e9a39111c2fa3add390ab15f3a44f3ca3"
 uuid = "22cec73e-a1b8-11e9-2c92-598750a2cf9c"
@@ -1427,6 +1499,12 @@ deps = ["Dates", "Mmap", "Parsers", "SnoopPrecompile", "StructTypes", "UUIDs"]
 git-tree-sha1 = "84b10656a41ef564c39d2d477d7236966d2b5683"
 uuid = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 version = "1.12.0"
+
+[[deps.JuliaHubData]]
+deps = ["AWS", "Base64", "Dates", "Downloads", "HTTP", "JSON", "MbedTLS", "Pkg", "Random", "TOML", "URIs", "UUIDs"]
+git-tree-sha1 = "1bf096c37311d76a69caacba4f8c2adb0921f0cc"
+uuid = "e241c0f9-2941-4184-86f1-92558f4420e8"
+version = "0.3.6"
 
 [[deps.JuliaVariables]]
 deps = ["MLStyle", "NameResolution"]
@@ -1530,10 +1608,12 @@ version = "1.0.0"
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
 uuid = "b27032c2-a3e7-50c8-80cd-2d36dbcbfd21"
+version = "0.6.3"
 
 [[deps.LibCURL_jll]]
 deps = ["Artifacts", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Zlib_jll", "nghttp2_jll"]
 uuid = "deac9b47-8bc7-5906-a0fe-35ac56dc84c0"
+version = "7.84.0+0"
 
 [[deps.LibGit2]]
 deps = ["Base64", "NetworkOptions", "Printf", "SHA"]
@@ -1542,6 +1622,7 @@ uuid = "76f85450-5226-5b5a-8eaa-529ad045b433"
 [[deps.LibSSH2_jll]]
 deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
 uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
+version = "1.10.2+0"
 
 [[deps.Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
@@ -1682,6 +1763,7 @@ version = "1.1.7"
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
+version = "2.28.0+0"
 
 [[deps.Measures]]
 git-tree-sha1 = "c13304c81eec1ed3af7fc20e75fb6b26092a1102"
@@ -1715,6 +1797,12 @@ version = "1.1.0"
 [[deps.Mmap]]
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
+[[deps.Mocking]]
+deps = ["Compat", "ExprTools"]
+git-tree-sha1 = "782e258e80d68a73d8c916e55f8ced1de00c2cea"
+uuid = "78c3b35d-d492-501b-9361-3d52fe80e533"
+version = "0.7.6"
+
 [[deps.MolecularGraph]]
 deps = ["DelimitedFiles", "JSON", "LinearAlgebra", "Printf", "Requires", "Statistics", "Unmarshal", "YAML", "coordgenlibs_jll", "libinchi_jll"]
 git-tree-sha1 = "2c4173d918e302011361852864923f9bc2fb6b4c"
@@ -1729,6 +1817,7 @@ version = "0.3.4"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
+version = "2022.2.1"
 
 [[deps.MuladdMacro]]
 git-tree-sha1 = "cac9cc5499c25554cba55cd3c30543cff5ca4fab"
@@ -1785,6 +1874,7 @@ version = "0.4.13"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+version = "1.2.0"
 
 [[deps.NonlinearSolve]]
 deps = ["ArrayInterface", "DiffEqBase", "EnumX", "FiniteDiff", "ForwardDiff", "LinearAlgebra", "LinearSolve", "RecursiveArrayTools", "Reexport", "SciMLBase", "SimpleNonlinearSolve", "SnoopPrecompile", "SparseArrays", "SparseDiffTools", "StaticArraysCore", "UnPack"]
@@ -1818,10 +1908,12 @@ version = "0.2.3"
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+version = "0.3.20+0"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+version = "0.8.1+0"
 
 [[deps.OpenSSL]]
 deps = ["BitFlags", "Dates", "MozillaCACerts_jll", "OpenSSL_jll", "Sockets"]
@@ -1867,6 +1959,7 @@ version = "6.50.0"
 [[deps.PCRE2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
+version = "10.40.0+0"
 
 [[deps.PDMats]]
 deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
@@ -1925,6 +2018,7 @@ version = "0.40.1+0"
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+version = "1.8.0"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
@@ -2072,6 +2166,12 @@ git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
 version = "1.2.2"
 
+[[deps.ReplMaker]]
+deps = ["REPL", "Unicode"]
+git-tree-sha1 = "f8bb680b97ee232c4c6591e213adc9c1e4ba0349"
+uuid = "b873ce64-0db9-51f5-a568-4457d8e49576"
+version = "0.2.7"
+
 [[deps.Requires]]
 deps = ["UUIDs"]
 git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
@@ -2083,6 +2183,12 @@ deps = ["StaticArrays"]
 git-tree-sha1 = "256eeeec186fa7f26f2801732774ccf277f05db9"
 uuid = "ae5879a3-cd67-5da8-be7f-38c6eb64a37b"
 version = "1.1.1"
+
+[[deps.ResourceContexts]]
+deps = ["Logging"]
+git-tree-sha1 = "0e9863272a09aff6579a987dd7fe3f94e32f6673"
+uuid = "8d208092-d35c-4dd3-a0d7-8325f9cce6b4"
+version = "0.2.0"
 
 [[deps.ReverseDiff]]
 deps = ["ChainRulesCore", "DiffResults", "DiffRules", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "SpecialFunctions", "StaticArrays", "Statistics"]
@@ -2110,6 +2216,7 @@ version = "0.5.6"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+version = "0.7.0"
 
 [[deps.SIMDTypes]]
 git-tree-sha1 = "330289636fb8107c5f32088d2741e9fd7a061a5c"
@@ -2206,6 +2313,12 @@ version = "1.0.3"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
+
+[[deps.SodiumSeal]]
+deps = ["Base64", "Libdl", "libsodium_jll"]
+git-tree-sha1 = "80cef67d2953e33935b41c6ab0a178b9987b1c99"
+uuid = "2133526b-2bfb-4018-ac12-889fb3908a75"
+version = "0.1.1"
 
 [[deps.SortingAlgorithms]]
 deps = ["DataStructures"]
@@ -2347,6 +2460,7 @@ uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 [[deps.SuiteSparse_jll]]
 deps = ["Artifacts", "Libdl", "Pkg", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
+version = "5.10.1+0"
 
 [[deps.Sundials]]
 deps = ["CEnum", "DataStructures", "DiffEqBase", "Libdl", "LinearAlgebra", "Logging", "Reexport", "SciMLBase", "SnoopPrecompile", "SparseArrays", "Sundials_jll"]
@@ -2369,6 +2483,7 @@ version = "0.2.2"
 [[deps.TOML]]
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.0"
 
 [[deps.TableTraits]]
 deps = ["IteratorInterfaceExtensions"]
@@ -2385,6 +2500,7 @@ version = "1.10.1"
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
+version = "1.10.1"
 
 [[deps.TensorCore]]
 deps = ["LinearAlgebra"]
@@ -2546,6 +2662,12 @@ git-tree-sha1 = "93c41695bc1c08c46c5899f4fe06d6ead504bb73"
 uuid = "02c8fc9c-b97f-50b9-bbe4-9be30ff0a78a"
 version = "2.10.3+0"
 
+[[deps.XMLDict]]
+deps = ["EzXML", "IterTools", "OrderedCollections"]
+git-tree-sha1 = "d9a3faf078210e477b291c79117676fca54da9dd"
+uuid = "228000da-037f-5747-90a9-8195ccbf91a5"
+version = "0.4.1"
+
 [[deps.XSLT_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgcrypt_jll", "Libgpg_error_jll", "Libiconv_jll", "Pkg", "XML2_jll", "Zlib_jll"]
 git-tree-sha1 = "91844873c4085240b95e795f692c4cec4d805f8a"
@@ -2621,6 +2743,7 @@ version = "0.10.1"
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+version = "1.2.12+3"
 
 [[deps.Zygote]]
 deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "Requires", "SnoopPrecompile", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
@@ -2649,6 +2772,7 @@ version = "0.1.0+0"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+version = "5.1.1+0"
 
 [[deps.libcleri_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "PCRE2_jll", "Pkg"]
@@ -2668,6 +2792,12 @@ git-tree-sha1 = "94d180a6d2b5e55e447e2d27a29ed04fe79eb30c"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
 version = "1.6.38+0"
 
+[[deps.libsodium_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "848ab3d00fe39d6fbc2a8641048f8f272af1c51e"
+uuid = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
+version = "1.0.20+0"
+
 [[deps.micromamba_jll]]
 deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
 git-tree-sha1 = "087555b0405ed6adf526cef22b6931606b5af8ac"
@@ -2677,16 +2807,19 @@ version = "1.4.1+0"
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
+version = "1.48.0+0"
 
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
+version = "17.4.0+0"
 """
 
 # ╔═╡ Cell order:
 # ╟─95450e24-a1a3-11ed-2b36-c9ef4bfe3dd0
 # ╠═03e3c34f-f43e-4bf8-bc39-c66dd9059c0e
 # ╟─76cb16d4-61eb-4db4-8574-247078043ba1
+# ╠═10a99c8e-2ef5-43f7-a82f-0f7dc30e2d6d
 # ╟─a55e9ca6-0396-4dc1-afd8-379dc03063fe
 # ╠═a41c48b6-3a4c-4bf5-9cfd-81388424a20d
 # ╠═5b68df70-f055-4069-a35b-c173870e984e
@@ -2708,33 +2841,25 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═b73dc3d3-ee38-46c7-a268-e47c0d692c9a
 # ╠═87aedd6e-9af1-442d-93bd-6b1a45838315
 # ╠═bef802d7-9715-4c11-bb73-de2949cbc0fc
-# ╠═fc4625bb-9b16-4fc8-8b8e-175758115aeb
+# ╟─fc4625bb-9b16-4fc8-8b8e-175758115aeb
 # ╠═17ab9f6e-abde-453e-aace-b3694eb31f64
-# ╠═175f5541-1929-4d2f-aca0-82be15890738
-# ╠═b959d3ba-83a6-4880-8532-697f58ef3ac2
-# ╠═1eb1a96d-a307-47ff-b77c-a1d004a933e0
-# ╠═4bdcc41b-083a-4687-aee5-bbc23f94363b
+# ╟─4bdcc41b-083a-4687-aee5-bbc23f94363b
 # ╠═5603bf38-7e37-4372-a6c1-7c8f6dd472a0
-# ╠═7b6424a4-fdec-470d-9483-75a2f323d16d
+# ╟─7b6424a4-fdec-470d-9483-75a2f323d16d
 # ╠═19812716-75a9-4e9d-9254-c4629842430e
-# ╠═a0286abe-aca7-442d-be1e-0298a38651ff
-# ╠═658a48c2-8409-4128-88e5-b974fe30701b
-# ╠═38f64f77-ff0f-43cc-b7b4-ac9ab38137ac
-# ╠═f995ee00-d7c0-477a-8237-f9ddc1209468
+# ╟─658a48c2-8409-4128-88e5-b974fe30701b
+# ╟─f995ee00-d7c0-477a-8237-f9ddc1209468
 # ╠═dd814c0a-e9d5-4749-bf8a-cb25cd7b0cab
-# ╠═af296313-5ac4-4763-977f-c08064927007
-# ╠═71607db5-64cf-4c05-b7ae-ac7f0a7f31a6
-# ╠═4d7c27c9-6540-4165-8fea-fbae95cdcca4
+# ╟─4d7c27c9-6540-4165-8fea-fbae95cdcca4
 # ╠═a7260180-244c-4600-bd89-72e7bc857544
-# ╠═789480db-6ad6-45fd-bc2f-8181cbd274a8
-# ╠═c2d96ebe-f082-4cbb-96c3-d3a04114608d
+# ╟─2b5b1ef3-a782-43d5-9f16-20bc8303d67a
 # ╟─78791a9e-9537-4d66-9609-d470c90c675e
 # ╠═d2d30fca-8914-4853-ba20-32f50244be01
 # ╟─26ac75f4-bab7-47e7-aad9-c6fa9e031737
 # ╠═1686acf1-8d78-46a2-b1c6-925d1a3bccef
 # ╟─57bae6d8-d52f-4f2c-be6e-a1b1fc017dcb
 # ╠═c77230c7-4b80-4312-b91d-2569b4d9e947
-# ╠═601dcef9-a5fe-4939-888f-6acc455b852e
+# ╟─601dcef9-a5fe-4939-888f-6acc455b852e
 # ╠═d47cc98c-464c-4661-bcde-8d6fb6c04a86
 # ╟─cb3e6815-4e48-4dff-90c3-cba87886cdab
 # ╠═8686925b-5e74-43dd-9f55-afbf9fbef1de
@@ -2743,7 +2868,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─f99a0111-1348-4c12-8bc7-ac02ea4cee21
 # ╠═ad0ea23c-512c-482b-ab02-59397fe3a9ab
 # ╟─6bf7dd34-d1f3-4145-ac95-069886c8a850
-# ╠═3bedaca0-d74b-4fa2-b910-593c8603ee33
+# ╟─3bedaca0-d74b-4fa2-b910-593c8603ee33
 # ╠═15d31f64-8d36-4b85-bb11-cd80b111b781
 # ╟─9dbff198-c067-4252-9673-450844810116
 # ╠═66af0ad2-aea8-4416-8627-c0f29384c7da

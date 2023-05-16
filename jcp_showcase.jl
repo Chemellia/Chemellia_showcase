@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.24
+# v0.19.16
 
 using Markdown
 using InteractiveUtils
@@ -16,8 +16,26 @@ end
 
 # ╔═╡ 03e3c34f-f43e-4bf8-bc39-c66dd9059c0e
 begin
-	using PlutoUI, AtomsBase, AtomsIO, AtomGraphs, AtomicGraphNets, ChemistryFeaturization, DataFrames, Flux
-	using ChemistryFeaturization.ElementFeature
+	using DataFrames, Flux, PlutoUI, Test
+	using AtomsBase, AtomsIO
+	using AtomGraphs, AtomicGraphNets, ChemistryFeaturization
+end
+
+# ╔═╡ 10a99c8e-2ef5-43f7-a82f-0f7dc30e2d6d
+# If the notebook is being run on JuliaHub, first retrieve the dataset assets required for running the notebook.
+if haskey(ENV, "JULIAHUB_APP_URL")
+	begin
+		using JuliaHubData, DataSets
+		datasets = ["mp-195", "VInO4"]
+		for structure in datasets
+			open(IO, dataset("thazhemadam/$(structure)")) do io
+				write("$(structure).cif", io)
+			end
+			open(IO, dataset("thazhemadam/$(structure)-image")) do io
+				write("$(structure).png", io)
+			end
+		end
+	end
 end
 
 # ╔═╡ 7234d025-4a70-4d55-a199-1c26c45ddd23
@@ -72,8 +90,8 @@ cutoff_slider = @bind cutoff Scrubbable(2.75:0.25:4, format=".2f")
 
 # ╔═╡ c20fb391-1765-4b29-9eb8-7f2c8f4351bf
 begin
-	VInO₄_smallcutoff = AtomGraph("./VInO4.cif", cutoff_radius=cutoff)
-	visualize(VInO₄_smallcutoff)
+	VInO₄ = AtomGraph("VInO4.cif", cutoff_radius=cutoff)
+	visualize(VInO₄)
 end
 
 # ╔═╡ 7e3ad6e5-323b-4e29-ba58-6c243a416ea9
@@ -95,7 +113,7 @@ To start, suppose we're interested in featurizing our graphs with information ab
 """
 
 # ╔═╡ a55da127-e349-42fe-9280-e1c868c025f7
-block = ElementFeatureDescriptor("Block")
+block = ElementFeature.ElementFeatureDescriptor("Block")
 
 # ╔═╡ c731b3fc-8b39-40a6-9b75-5e021795a495
 md"""
@@ -116,7 +134,7 @@ md"The ones that just have names of orbitals are the energy levels of those orbi
 
 # ╔═╡ 0656f790-f295-48a5-8a18-f671dd1db925
 begin
-	sixp = ElementFeatureDescriptor("6p")
+	sixp = ElementFeature.ElementFeatureDescriptor("6p")
 	encodable_elements(sixp)
 end
 
@@ -130,14 +148,14 @@ We can also easily define custom features. For an `ElementFeatureDescriptor`, al
 # ╔═╡ b73dc3d3-ee38-46c7-a268-e47c0d692c9a
 begin
 	lookup_table = DataFrame(["Ho" 73; "Pt" 92; "In" 126; "V" 40], [:Symbol, :Awesomeness])
-	awesomeness = ElementFeatureDescriptor("Awesomeness", lookup_table)
+	awesomeness = ElementFeature.ElementFeatureDescriptor("Awesomeness", lookup_table)
 end
 
 # ╔═╡ 87aedd6e-9af1-442d-93bd-6b1a45838315
 awesomeness(HoPt₃)
 
 # ╔═╡ bef802d7-9715-4c11-bb73-de2949cbc0fc
-awesomeness(VInO₄_smallcutoff)
+@test_throws AssertionError awesomeness(VInO₄) # The awesomeness feature isn't defined for VInO₄!
 
 # ╔═╡ fc4625bb-9b16-4fc8-8b8e-175758115aeb
 md"""
@@ -147,19 +165,95 @@ md"""
 
 The next idea we'll introduce (and one that's key to the separation of concerns within the Chemellia framework) is that of Codecs, or "encoder-decoders." The key insight behind Codecs is that the actual value of a feature is entirely distinct from the way it is encoded in order to be passed into a model, and in fact, often one might want to encode the same feature in multiple distinct ways for different applications. In addition, often the encoded version of a feature is substantially less human-readable than its actual value.
 
-As one example, 
+#### OneHotOneCold
 
-(ANANT)
+As one example, consider the `OneHotOneCold` Codec. As the name suggests, this Codec performs one-hot encoding of a given feature value and decodes using a one-cold decoding scheme.
+
+##### Categorical Values
+Remember the `block` feature descriptor from before? We can very easily encode and decode this categorical feature using one-hot encoding.
 """
 
-# ╔═╡ 175f5541-1929-4d2f-aca0-82be15890738
-# focus mainly on OneHotOneCold
-# show encoding of some of the features above using that
-# show different bin numbers/spacings for continuous-valued
-# show `default_codec`
+# ╔═╡ 17ab9f6e-abde-453e-aace-b3694eb31f64
+begin
+	ohoc_block = OneHotOneCold(true, ["s", "p", "d", "f"])
+	local encoded_block = encode(block(HoPt₃), ohoc_block)
+	local decoded_block = map(x -> decode(x, ohoc_block), encoded_block)
+	@info "Feature" block(HoPt₃)
+	@info "Encoded Feature" encoded_block
+	@info "Decoded Feature" decoded_block
+end
 
-# ╔═╡ 4b5da3b1-3c13-43ac-bb3f-952420f450d1
-# also remark/briefly show DirectCodec just to make clear that there are other options
+# ╔═╡ 4bdcc41b-083a-4687-aee5-bbc23f94363b
+md"""
+##### Continuous Values
+
+Alright, we've seen that this works for a categorical variable. But, does this also work for continuous values too? Yes, it does!
+
+Let's consider a continuous feature, Atomic mass.
+"""
+
+# ╔═╡ 5603bf38-7e37-4372-a6c1-7c8f6dd472a0
+amu = ElementFeatureDescriptor("Atomic mass")
+
+# ╔═╡ 7b6424a4-fdec-470d-9483-75a2f323d16d
+md"""
+Let's also define the bins with heuristically selected values, given the range of values.
+"""
+
+# ╔═╡ 19812716-75a9-4e9d-9254-c4629842430e
+begin
+	ohoc_amu = OneHotOneCold(false, [163, 165, 194, 197])
+	local encoded_amu = encode(amu(HoPt₃), ohoc_amu)
+	local decoded_amu = map(x -> decode(x, ohoc_amu), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
+
+# ╔═╡ 658a48c2-8409-4128-88e5-b974fe30701b
+md"""
+As it is with continuous values, after binning, we cannot recover the original values while decoding, only the bins into which the values were decoded themselves.
+"""
+
+# ╔═╡ f995ee00-d7c0-477a-8237-f9ddc1209468
+md"""
+#### Simple Codec
+Let's now check out how we can write a simple Codec that performs a simple scaling and shifting operation, using a `SimpleCodec`!
+We will have to define the encoding and decoding mechanism, and we can simply use `encode` and `decode` as we would normally!
+"""
+
+# ╔═╡ dd814c0a-e9d5-4749-bf8a-cb25cd7b0cab
+begin
+	local simple = SimpleCodec(x -> 2x, x -> x/2)
+	local encoded_amu = encode(amu(HoPt₃), simple)
+	local decoded_amu = map(x -> decode(x, simple), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
+
+# ╔═╡ 4d7c27c9-6540-4165-8fea-fbae95cdcca4
+md"""
+#### Direct Codec
+We can also perform the same scaling operation using a `DirectCodec`, which is meant to be used for the same.
+"""
+
+# ╔═╡ a7260180-244c-4600-bd89-72e7bc857544
+begin
+	local direct = DirectCodec(2) # to scale by 2
+	local encoded_amu = encode(amu(HoPt₃), direct)
+	local decoded_amu = map(x -> decode(x, direct), encoded_amu)
+	@info "Feature" amu(HoPt₃)
+	@info "Encoded Feature" encoded_amu
+	@info "Decoded Feature" decoded_amu
+end
+
+# ╔═╡ 2b5b1ef3-a782-43d5-9f16-20bc8303d67a
+md"""#### Custom Codecs
+But what if we want to write a custom Codec? It's simple! There's only two rules that your custom Codec needs to comply with.
+  * Your custom Codec must be a sub-type of `AbstractCodec`.
+  * Your custom Codec must have an associated `encode` and `decode` mechanism defined.
+"""
 
 # ╔═╡ 78791a9e-9537-4d66-9609-d470c90c675e
 md"""
@@ -188,7 +282,7 @@ md"""Let's try building another `GraphNodeFeaturization` that includes some of t
 fzn_custom = GraphNodeFeaturization([block, awesomeness])
 
 # ╔═╡ 601dcef9-a5fe-4939-888f-6acc455b852e
-md"""Note that `encodable_elements` works on a featurization exactly the way you woul expect (namely, it returns the intersection of the results on each feature):"""
+md"""Note that `encodable_elements` works on a featurization exactly the way you would expect (namely, it returns the intersection of the results on each feature):"""
 
 # ╔═╡ d47cc98c-464c-4661-bcde-8d6fb6c04a86
 encodable_elements(fzn_custom) # just the ones that awesomeness can encode
@@ -197,7 +291,7 @@ encodable_elements(fzn_custom) # just the ones that awesomeness can encode
 md"""Finally, for ultimate tweakability, we can also feed in our own codecs, too!"""
 
 # ╔═╡ 8686925b-5e74-43dd-9f55-afbf9fbef1de
-# TODO: use codecs Anant constructs above for this example
+fzn_morecustom = GraphNodeFeaturization([block, amu], [ohoc_block, ohoc_amu])
 
 # ╔═╡ 6ae1ed8e-603a-4828-a562-1361516ec9ab
 md"""Now let's see how we actually encode a featurization. Internally, what this function will do is call the `encode` method for each feature and then combine the results in the way specified for that featurization type. In the case of `GraphNodeFeaturization`, that simply means a concatenation."""
@@ -221,37 +315,99 @@ In this section, we will demonstrate how to build inputs for and architecture of
 md"""
 ### FeaturizedAtoms objects
 
-introduce what this is, emphasize it as a mechanism for retaining provenance of encoded features, etc., serializability for reuse later
-
-(ANANT)
+FeaturizedAtoms objects encapsulate an atomic structure, a featurization scheme and the resultant encoded features that are generated by applying the featurization scheme to the atomic structure.
+This mechanism ensures that we have the sufficient data (and metadata) required to effectively pre-featurize and serialize the object at given point, all while retaining the provenance of the encoded features (within reasonable limits, depending on the encoding and decoding mechanisms).
 """
 
 # ╔═╡ 15d31f64-8d36-4b85-bb11-cd80b111b781
-# somewhere we need this line since it will be used a few times below:
 fg = featurize(HoPt₃, fzn)
 
-# ╔═╡ 66af0ad2-aea8-4416-8627-c0f29384c7da
+# ╔═╡ 9dbff198-c067-4252-9673-450844810116
+md"""We can `decode` a `FeaturizedAtoms` object as a single argument, since it has everything that's needed..."""
 
+# ╔═╡ 66af0ad2-aea8-4416-8627-c0f29384c7da
+decode(fg)
 
 # ╔═╡ c0241b9c-77d1-47a0-9eb5-d65e7036e69c
 md"""
 ### AtomicGraphNets layers and models
 AtomicGraphNets provides a number of standard layers for operations such as graph convolution and pooling, as well as interfacing seamlessly with layers provided by Flux.jl.
+
+The "workhorse" layer is the graph convolutional layer, `AGNConv`. Its action is to perform a graph convolution (using the graph Laplacian stored in the `AtomGraph` object). This is multiplied by the `convweight` matrix, added to the original input features multiplied by the `selfweight` matrix, and finally, the `bias` is added element-wise to give the final output.
+
+We can construct one as follows, feeding the desired input and output node feature vector lengths:
 """
 
-# ╔═╡ 41ffa75e-c0cb-4d76-803f-48553db8f626
-# show building up a model "from scratch" and easy inspection of layers
-# show convenience constructor for "typical" architectures within AGN
-# show running a forward and backward pass on structures from above
-
-# ╔═╡ 58656c12-d6b3-42bb-ba58-f1d283f98614
-# if time, maybe include some benchmarking against cgcnn.py here, and/or in main manuscript
-
-# ╔═╡ 04106bba-7302-4e93-aecd-73a14d0aea03
+# ╔═╡ 53f83fcb-50e7-4d32-ab69-56fe4e54f425
 la = AGNConv(14=>14)
 
-# ╔═╡ 3fab6bb3-e923-40e5-9ff9-438564462161
+# ╔═╡ 2d0393dc-8083-4fe9-9d5f-e9cd76af243f
+md"""This can be applied directly to our featurized graph from above. The output is a copy of the graph Laplacian as well as the output feature matrix (i.e. the node feature vectors concatenated together). The Laplacian is ``passed through'' so that the full `FeaturizedAtoms` object doesn't need to be."""
 
+# ╔═╡ 8d619f4c-beea-4917-8f71-49dd7bc82501
+la(fg)
+
+# ╔═╡ c81bd54d-c1de-44a5-b586-601310463be4
+md"""We can apply it multiple times, too..."""
+
+# ╔═╡ 82bad2b4-4598-436e-811b-fb19c9a69c9f
+la(la(fg))
+
+# ╔═╡ def924ff-4e46-4670-9f4b-112a1bf243d1
+md"""Or chain multiple of them together with different sized latent spaces... (`Chain` is just Flux.jl shorthand for function composition)"""
+
+# ╔═╡ 4f860da9-22d2-4e4b-8fa5-e9f9797039cb
+begin
+	c = Chain(la, AGNConv(14=>10), AGNConv(10=>6))
+	c(fg)
+end
+
+# ╔═╡ 5e374c75-5fc1-4407-a667-33b1e79553a3
+md"""But to build a full model, we need some other layers, too -- note that the output size of a convolutional layer will depend on the size of the input graph. We can use a *pooling* layer to get to a predictable output size. The `AGNPool` layer will apply a specified pooling function (for example, maximum or average) across nodes and reduce along the features (dim, stride, and pad will be automatically computed from the desired input and output sizes and a target ratio between dim and feature length) to get to the desired output dimensions:"""
+
+# ╔═╡ bc5bc9a7-3e5a-47bb-bd86-bac74208df39
+c2 = Chain(c, AGNPool("mean", 6, 3, 0.4))
+
+# ╔═╡ e7a82f17-ed97-48e2-a8f4-95cb6b65a7ce
+c2(fg) # output now will always be 3 x 1
+
+# ╔═╡ 92ef3b47-c050-4a1b-bebf-11d09be0665a
+md"""We can of course build up entire models "from scratch" in this way. However, AtomicGraphNets also includes some convenience functions for standard types of architectures. One of these is `build_CGCNN`, which will build a model similar to those in cgcnn.py. It takes one required argument for `input_feature_length` and a number of optional keyword arguments to make tweaks to the architecture such as number of layers, activation functions, etc. We'll utilize a few of them here."""
+
+# ╔═╡ e6bc074f-f68f-4285-b058-7e2f6c665663
+model = build_CGCNN(14, pooled_feature_length=8, num_hidden_layers=2)
+
+# ╔═╡ 2d5a6b65-7703-4d31-8eb7-e7ef90460f65
+md"""We can evaluate the model on a single input to get a prediction:"""
+
+# ╔═╡ 58656c12-d6b3-42bb-ba58-f1d283f98614
+model(fg)
+
+# ╔═╡ 04106bba-7302-4e93-aecd-73a14d0aea03
+md"""...but that doesn't mean much when we don't even know what we're predicting, and haven't done any model training! 
+
+Training proceeds as with any Flux.jl model. Let's demonstrate how that works for a "toy" dataset..."""
+
+# ╔═╡ 98bd6bea-9d2e-48c3-843b-e29e860fe5ae
+train_set = [(fg, 1.0)]
+
+# ╔═╡ 32df46cc-4131-40bc-a1e0-1b46a5dcb01c
+begin
+	opt_state = Flux.setup(Adam(), model)
+	loss = Flux.Losses.mse
+	
+	for epoch in 1:5
+	  Flux.train!(model, train_set, opt_state) do m, x, y
+	    loss(m(x), y)
+	  end
+	end
+end
+
+# ╔═╡ 9e640d76-eaa5-45fe-b2d4-f6ee5483dfed
+md"""If we now evaluate the model on that same piece of data again, we'll see the result has moved in the right direction..."""
+
+# ╔═╡ 89a79d36-d201-43f1-8a56-c66457cc4848
+model(fg)
 
 # ╔═╡ c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 md"""
@@ -299,14 +455,14 @@ lg(fg)
 # ╔═╡ 1d199188-384a-4836-a051-b93b7d75ca86
 md"""...and also for a chained combination of layers..."""
 
-# ╔═╡ 62b1cea7-2727-410a-b814-e003afad56b6
+# ╔═╡ 43609597-d5e3-454b-af6b-abb7f01a91ea
 m = Chain(la, lg)
 
 # ╔═╡ 0adcca11-bbca-42ca-ba38-3e7ffee703cc
 m(fg)
 
 # ╔═╡ 60394155-ba71-450e-93b2-8123b487561d
-md"""But GCNConv is almost the same as AtomicGraphNets `AGNConv` really, so it's not really all that interesting or exciting, let's try something a bit different...how about the `TopKPool` layer?
+md"""But GCNConv is almost the same as AtomicGraphNets' `AGNConv` really, so it's not really all that interesting or exciting, let's try something a bit different...how about the `TopKPool` layer?
 
 (note that this layer as constructed takes a fixed adjacency matrix, so it's likely not that useful for our purposes, this is more for demonstration...though I think it would be pretty easy to make a version that doesn't need to be that way)
 
@@ -320,13 +476,13 @@ As before, we first define the dispatch..."""
 md"""...and check that it works."""
 
 # ╔═╡ 35603fa9-254d-4e74-a2d3-d1a72a593107
-tk = TopKPool(fg.atoms.graph.weights, 8, 10) # adjacency matrix, k, input size
+tk = TopKPool(fg.atoms.graph.weights, 4, 10) # adjacency matrix, k, input size
 
 # ╔═╡ 68c64be8-2664-4c24-8e90-939e94102aea
 m2 = Chain(la, lg, tk)
 
 # ╔═╡ 52f90156-7640-4e74-86f0-6d352475818d
-m2(fg) # okay not sure what has broken this in the interim, but will figure it out...
+m2(fg)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -337,10 +493,13 @@ AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 AtomsIO = "1692102d-eeb4-4df9-807b-c9517f998d44"
 ChemistryFeaturization = "6c925690-434a-421d-aea7-51398c5b007a"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataSets = "c9661210-8a83-48f0-b833-72e62abce419"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 GeometricFlux = "7e08b658-56d3-11e9-2997-919d5b31e4ea"
 GraphSignals = "3ebe565e-a4b5-49c6-aed2-300248c3a9c1"
+JuliaHubData = "e241c0f9-2941-4184-86f1-92558f4420e8"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 AtomGraphs = "~0.1.3"
@@ -349,9 +508,11 @@ AtomsBase = "~0.2.5"
 AtomsIO = "~0.1.2"
 ChemistryFeaturization = "~0.7.1"
 DataFrames = "~1.3.6"
+DataSets = "~0.2.9"
 Flux = "~0.13.13"
 GeometricFlux = "~0.13.8"
 GraphSignals = "~0.8.5"
+JuliaHubData = "~0.3.6"
 PlutoUI = "~0.7.50"
 """
 
@@ -361,13 +522,19 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.5"
 manifest_format = "2.0"
-project_hash = "6b644cedd2812d53e35b51c93bbc75af437c7ef3"
+project_hash = "dd2c330517a73b5fc5552c0cfecf9cb08a45305a"
 
 [[deps.ASEconvert]]
 deps = ["AtomsBase", "CondaPkg", "PeriodicTable", "PythonCall", "Unitful", "UnitfulAtomic"]
 git-tree-sha1 = "8f62517390341fa47bce341a598aed60d824b14a"
 uuid = "3da9722f-58c2-4165-81be-b4d7253e8fd2"
 version = "0.1.3"
+
+[[deps.AWS]]
+deps = ["Base64", "Compat", "Dates", "Downloads", "GitHub", "HTTP", "IniFile", "JSON", "MbedTLS", "Mocking", "OrderedCollections", "Random", "SHA", "Sockets", "URIs", "UUIDs", "XMLDict"]
+git-tree-sha1 = "8ae44ce9415f2c2c8163258c003460530a6f095b"
+uuid = "fbe9abb3-538b-5e4e-ba9e-bc94f4f92ebc"
+version = "1.82.0"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -381,11 +548,16 @@ git-tree-sha1 = "8eaf9f1b4921132a4cff3f36a1d9ba923b14a481"
 uuid = "6e696c72-6542-2067-7265-42206c756150"
 version = "1.1.4"
 
+[[deps.AbstractTrees]]
+git-tree-sha1 = "faa260e4cb5aba097a73fab382dd4b5819d8ec8c"
+uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+version = "0.4.4"
+
 [[deps.Accessors]]
 deps = ["Compat", "CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "LinearAlgebra", "MacroTools", "Requires", "StaticArrays", "Test"]
-git-tree-sha1 = "beabc31fa319f9de4d16372bff31b4801e43d32c"
+git-tree-sha1 = "c7dddee3f32ceac12abd9a21cd0c4cb489f230d2"
 uuid = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
-version = "0.1.28"
+version = "0.1.29"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -446,6 +618,12 @@ deps = ["AtomGraphs", "CSV", "ChemistryFeaturization", "DataFrames", "DelimitedF
 git-tree-sha1 = "9ca8021d9ef775e1e1cbdb3a134fc58aff57ad72"
 uuid = "ccdf130a-3c88-4595-a023-a7e7f78b9dd5"
 version = "0.2.4"
+
+[[deps.Atomix]]
+deps = ["UnsafeAtomics"]
+git-tree-sha1 = "c06a868224ecba914baa6942988e2f2aade419be"
+uuid = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
+version = "0.1.0"
 
 [[deps.AtomsBase]]
 deps = ["PeriodicTable", "Printf", "StaticArrays", "Unitful", "UnitfulAtomic"]
@@ -579,9 +757,9 @@ version = "0.3.11"
 
 [[deps.ChainRules]]
 deps = ["Adapt", "ChainRulesCore", "Compat", "Distributed", "GPUArraysCore", "IrrationalConstants", "LinearAlgebra", "Random", "RealDot", "SparseArrays", "Statistics", "StructArrays"]
-git-tree-sha1 = "7d20c2fb8ab838e41069398685e7b6b5f89ed85b"
+git-tree-sha1 = "8bae903893aeeb429cf732cf1888490b93ecf265"
 uuid = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-version = "1.48.0"
+version = "1.49.0"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra", "SparseArrays"]
@@ -590,10 +768,10 @@ uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 version = "1.15.7"
 
 [[deps.ChangesOfVariables]]
-deps = ["ChainRulesCore", "LinearAlgebra", "Test"]
-git-tree-sha1 = "485193efd2176b88e6622a39a246f8c5b600e74e"
+deps = ["LinearAlgebra", "Test"]
+git-tree-sha1 = "f84967c4497e0e1955f9a582c232b02847c5f589"
 uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
-version = "0.1.6"
+version = "0.1.7"
 
 [[deps.Chemfiles]]
 deps = ["Chemfiles_jll", "DocStringExtensions"]
@@ -626,10 +804,10 @@ uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
 version = "0.7.1"
 
 [[deps.ColorSchemes]]
-deps = ["ColorTypes", "ColorVectorSpace", "Colors", "FixedPointNumbers", "Random", "SnoopPrecompile"]
-git-tree-sha1 = "aa3edc8f8dea6cbfa176ee12f7c2fc82f0608ed3"
+deps = ["ColorTypes", "ColorVectorSpace", "Colors", "FixedPointNumbers", "PrecompileTools", "Random"]
+git-tree-sha1 = "be6ab11021cd29f0344d5c4357b163af05a48cba"
 uuid = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
-version = "3.20.0"
+version = "3.21.0"
 
 [[deps.ColorTypes]]
 deps = ["FixedPointNumbers", "Random"]
@@ -687,6 +865,12 @@ git-tree-sha1 = "455419f7e328a1a2493cabc6428d79e951349769"
 uuid = "a33af91c-f02d-484b-be07-31d278c5ca2b"
 version = "0.1.1"
 
+[[deps.ConcurrentUtilities]]
+deps = ["Serialization", "Sockets"]
+git-tree-sha1 = "b306df2650947e9eb100ec125ff8c65ca2053d30"
+uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
+version = "2.1.1"
+
 [[deps.CondaPkg]]
 deps = ["JSON3", "Markdown", "MicroMamba", "Pidfile", "Pkg", "TOML"]
 git-tree-sha1 = "741146cf2ced5859faae76a84b541aa9af1a78bb"
@@ -732,6 +916,12 @@ deps = ["Compat", "DataAPI", "Future", "InvertedIndices", "IteratorInterfaceExte
 git-tree-sha1 = "db2a9cb664fcea7836da4b414c3278d71dd602d2"
 uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 version = "1.3.6"
+
+[[deps.DataSets]]
+deps = ["AbstractTrees", "Base64", "Markdown", "REPL", "ReplMaker", "ResourceContexts", "SHA", "TOML", "UUIDs"]
+git-tree-sha1 = "bbb3ea880461e62709e8cb181856de19c383e99c"
+uuid = "c9661210-8a83-48f0-b833-72e62abce419"
+version = "0.2.9"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -908,6 +1098,12 @@ git-tree-sha1 = "9f076bea9ae0475ca87f7bb58db49559c13f9a2a"
 uuid = "352459e4-ddd7-4360-8937-99dcb397b478"
 version = "0.1.9"
 
+[[deps.EzXML]]
+deps = ["Printf", "XML2_jll"]
+git-tree-sha1 = "0fa3b52a04a4e210aeb1626def9c90df3ae65268"
+uuid = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
+version = "1.1.0"
+
 [[deps.FLoops]]
 deps = ["BangBang", "Compat", "FLoopsBase", "InitialValues", "JuliaVariables", "MLStyle", "Serialization", "Setfield", "Transducers"]
 git-tree-sha1 = "ffb97765602e3cbe59a0589d237bf07f245a8576"
@@ -1071,15 +1267,21 @@ version = "0.5.3"
 
 [[deps.GeometricFlux]]
 deps = ["CUDA", "ChainRulesCore", "DataStructures", "DelimitedFiles", "FillArrays", "Flux", "GraphSignals", "Graphs", "LinearAlgebra", "MLDatasets", "NNlib", "NNlibCUDA", "Optimisers", "Random", "Reexport", "SparseArrays", "Statistics", "StatsBase", "Word2Vec"]
-git-tree-sha1 = "eca9f8d935ec77c16b906d920f1f227ba15d5b18"
+git-tree-sha1 = "5aee76fadfaeecfeed9c1e034bad78d1f6da1284"
 uuid = "7e08b658-56d3-11e9-2997-919d5b31e4ea"
-version = "0.13.8"
+version = "0.13.9"
 
 [[deps.Gettext_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "XML2_jll"]
 git-tree-sha1 = "9b02998aba7bf074d14de89f9d37ca24a1a0b046"
 uuid = "78b55507-aeef-58d4-861c-77aaff3498b1"
 version = "0.21.0+0"
+
+[[deps.GitHub]]
+deps = ["Base64", "Dates", "HTTP", "JSON", "MbedTLS", "Sockets", "SodiumSeal", "URIs"]
+git-tree-sha1 = "5688002de970b9eee14b7af7bbbd1fdac10c9bbe"
+uuid = "bc5e4493-9b4d-5f90-b8aa-2b2bcaad7a26"
+version = "5.8.2"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "Gettext_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Pkg", "Zlib_jll"]
@@ -1135,10 +1337,10 @@ uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
 version = "1.12.2+2"
 
 [[deps.HTTP]]
-deps = ["Base64", "CodecZlib", "Dates", "IniFile", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
-git-tree-sha1 = "37e4657cd56b11abe3d10cd4a1ec5fbdb4180263"
+deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
+git-tree-sha1 = "69182f9a2d6add3736b7a06ab6416aafdeec2196"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "1.7.4"
+version = "1.8.0"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Pkg"]
@@ -1244,9 +1446,9 @@ version = "0.7.3"
 
 [[deps.InverseFunctions]]
 deps = ["Test"]
-git-tree-sha1 = "49510dfcb407e572524ba94aeae2fced1f3feb0f"
+git-tree-sha1 = "6667aadd1cdee2c6cd068128b3d226ebc4fb0c67"
 uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
-version = "0.1.8"
+version = "0.1.9"
 
 [[deps.InvertedIndices]]
 git-tree-sha1 = "0dc7b50b8d436461be01300fd8cd45aa0274b038"
@@ -1298,6 +1500,12 @@ git-tree-sha1 = "84b10656a41ef564c39d2d477d7236966d2b5683"
 uuid = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 version = "1.12.0"
 
+[[deps.JuliaHubData]]
+deps = ["AWS", "Base64", "Dates", "Downloads", "HTTP", "JSON", "MbedTLS", "Pkg", "Random", "TOML", "URIs", "UUIDs"]
+git-tree-sha1 = "1bf096c37311d76a69caacba4f8c2adb0921f0cc"
+uuid = "e241c0f9-2941-4184-86f1-92558f4420e8"
+version = "0.3.6"
+
 [[deps.JuliaVariables]]
 deps = ["MLStyle", "NameResolution"]
 git-tree-sha1 = "49fb3cb53362ddadb4415e9b73926d6b40709e70"
@@ -1306,15 +1514,21 @@ version = "0.2.4"
 
 [[deps.JumpProcesses]]
 deps = ["ArrayInterface", "DataStructures", "DiffEqBase", "DocStringExtensions", "FunctionWrappers", "Graphs", "LinearAlgebra", "Markdown", "PoissonRandom", "Random", "RandomNumbers", "RecursiveArrayTools", "Reexport", "SciMLBase", "StaticArrays", "TreeViews", "UnPack"]
-git-tree-sha1 = "740c685ba3d7f218663436b2152041563c19db6e"
+git-tree-sha1 = "50bd271af7f6cc23be7d24c8c4804809bb5d05ae"
 uuid = "ccbc3e58-028d-4f4c-8cd5-9ae44345cda5"
-version = "9.6.1"
+version = "9.6.3"
 
 [[deps.KLU]]
 deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse_jll"]
 git-tree-sha1 = "764164ed65c30738750965d55652db9c94c59bfe"
 uuid = "ef3ab10e-7fda-4108-b977-705223b18434"
 version = "0.4.0"
+
+[[deps.KernelAbstractions]]
+deps = ["Adapt", "Atomix", "InteractiveUtils", "LinearAlgebra", "MacroTools", "PrecompileTools", "SparseArrays", "StaticArrays", "UUIDs", "UnsafeAtomics", "UnsafeAtomicsLLVM"]
+git-tree-sha1 = "1e7e27a144936ed6f1b0a01dbc7b7f86afabeb6e"
+uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+version = "0.9.3"
 
 [[deps.Krylov]]
 deps = ["LinearAlgebra", "Printf", "SparseArrays"]
@@ -1481,10 +1695,10 @@ uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 version = "1.0.0"
 
 [[deps.LoopVectorization]]
-deps = ["ArrayInterface", "ArrayInterfaceCore", "CPUSummary", "ChainRulesCore", "CloseOpenIntervals", "DocStringExtensions", "ForwardDiff", "HostCPUFeatures", "IfElse", "LayoutPointers", "LinearAlgebra", "OffsetArrays", "PolyesterWeave", "SIMDTypes", "SLEEFPirates", "SnoopPrecompile", "SpecialFunctions", "Static", "StaticArrayInterface", "ThreadingUtilities", "UnPack", "VectorizationBase"]
-git-tree-sha1 = "defbfba8ddbccdc8ca3edb4a96a6d6fd3cd33ebd"
+deps = ["ArrayInterface", "ArrayInterfaceCore", "CPUSummary", "ChainRulesCore", "CloseOpenIntervals", "DocStringExtensions", "ForwardDiff", "HostCPUFeatures", "IfElse", "LayoutPointers", "LinearAlgebra", "OffsetArrays", "PolyesterWeave", "PrecompileTools", "SIMDTypes", "SLEEFPirates", "SpecialFunctions", "Static", "StaticArrayInterface", "ThreadingUtilities", "UnPack", "VectorizationBase"]
+git-tree-sha1 = "e7ce3cdc520da8135e73d7cb303e0617a19f582b"
 uuid = "bdcacae8-1622-11e9-2a5c-532679323890"
-version = "0.12.157"
+version = "0.12.158"
 
 [[deps.MAT]]
 deps = ["BufferedStreams", "CodecZlib", "HDF5", "SparseArrays"]
@@ -1583,6 +1797,12 @@ version = "1.1.0"
 [[deps.Mmap]]
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
+[[deps.Mocking]]
+deps = ["Compat", "ExprTools"]
+git-tree-sha1 = "782e258e80d68a73d8c916e55f8ced1de00c2cea"
+uuid = "78c3b35d-d492-501b-9361-3d52fe80e533"
+version = "0.7.6"
+
 [[deps.MolecularGraph]]
 deps = ["DelimitedFiles", "JSON", "LinearAlgebra", "Printf", "Requires", "Statistics", "Unmarshal", "YAML", "coordgenlibs_jll", "libinchi_jll"]
 git-tree-sha1 = "2c4173d918e302011361852864923f9bc2fb6b4c"
@@ -1617,10 +1837,10 @@ uuid = "2774e3e8-f4cf-5e23-947b-6d7e65073b56"
 version = "4.5.1"
 
 [[deps.NNlib]]
-deps = ["Adapt", "ChainRulesCore", "LinearAlgebra", "Pkg", "Random", "Requires", "Statistics"]
-git-tree-sha1 = "33ad5a19dc6730d592d8ce91c14354d758e53b0e"
+deps = ["Adapt", "Atomix", "ChainRulesCore", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "Pkg", "Random", "Requires", "Statistics"]
+git-tree-sha1 = "99e6dbb50d8a96702dc60954569e9fe7291cc55d"
 uuid = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
-version = "0.8.19"
+version = "0.8.20"
 
 [[deps.NNlibCUDA]]
 deps = ["Adapt", "CUDA", "LinearAlgebra", "NNlib", "Random", "Statistics"]
@@ -1697,9 +1917,9 @@ version = "0.8.1+0"
 
 [[deps.OpenSSL]]
 deps = ["BitFlags", "Dates", "MozillaCACerts_jll", "OpenSSL_jll", "Sockets"]
-git-tree-sha1 = "e9d68fe4b5f78f215aa2f0e6e6dc9e9911d33048"
+git-tree-sha1 = "7fb975217aea8f1bb360cf1dde70bad2530622d2"
 uuid = "4d8831e6-92b7-49fb-bdf8-b643e874388c"
-version = "1.3.4"
+version = "1.4.0"
 
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1847,6 +2067,12 @@ git-tree-sha1 = "18ef344185f25ee9d51d80e179f8dad33dc48eb1"
 uuid = "91cefc8d-f054-46dc-8f8c-26e11d7c5411"
 version = "3.0.3"
 
+[[deps.PrecompileTools]]
+deps = ["Preferences"]
+git-tree-sha1 = "2e47054ffe7d0a8872e977c0d09eb4b3d162ebde"
+uuid = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+version = "1.0.2"
+
 [[deps.Preferences]]
 deps = ["TOML"]
 git-tree-sha1 = "47e5f437cc0e7ef2ce8406ce1e7e24d44915f88d"
@@ -1901,9 +2127,9 @@ uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [[deps.Random123]]
 deps = ["Random", "RandomNumbers"]
-git-tree-sha1 = "7a1a306b72cfa60634f03a911405f4e64d1b718b"
+git-tree-sha1 = "552f30e847641591ba3f39fd1bed559b9deb0ef3"
 uuid = "74087812-796a-5b5d-8853-05524746bad3"
-version = "1.6.0"
+version = "1.6.1"
 
 [[deps.RandomNumbers]]
 deps = ["Random", "Requires"]
@@ -1918,16 +2144,16 @@ uuid = "c1ae055f-0cd5-4b69-90a6-9a35b1a98df9"
 version = "0.1.0"
 
 [[deps.RecipesBase]]
-deps = ["SnoopPrecompile"]
-git-tree-sha1 = "261dddd3b862bd2c940cf6ca4d1c8fe593e457c8"
+deps = ["PrecompileTools"]
+git-tree-sha1 = "5c3d09cc4f31f5fc6af001c250bf1278733100ff"
 uuid = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
-version = "1.3.3"
+version = "1.3.4"
 
 [[deps.RecursiveArrayTools]]
 deps = ["Adapt", "ArrayInterface", "DocStringExtensions", "GPUArraysCore", "IteratorInterfaceExtensions", "LinearAlgebra", "RecipesBase", "Requires", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tables"]
-git-tree-sha1 = "140cddd2c457e4ebb0cdc7c2fd14a7fbfbdf206e"
+git-tree-sha1 = "68078e9fa9130a6a768815c48002d0921a232c11"
 uuid = "731186ca-8d62-57ce-b412-fbd966d074cd"
-version = "2.38.3"
+version = "2.38.4"
 
 [[deps.RecursiveFactorization]]
 deps = ["LinearAlgebra", "LoopVectorization", "Polyester", "SnoopPrecompile", "StrideArraysCore", "TriangularSolve"]
@@ -1939,6 +2165,12 @@ version = "0.2.18"
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
 version = "1.2.2"
+
+[[deps.ReplMaker]]
+deps = ["REPL", "Unicode"]
+git-tree-sha1 = "f8bb680b97ee232c4c6591e213adc9c1e4ba0349"
+uuid = "b873ce64-0db9-51f5-a568-4457d8e49576"
+version = "0.2.7"
 
 [[deps.Requires]]
 deps = ["UUIDs"]
@@ -1952,11 +2184,17 @@ git-tree-sha1 = "256eeeec186fa7f26f2801732774ccf277f05db9"
 uuid = "ae5879a3-cd67-5da8-be7f-38c6eb64a37b"
 version = "1.1.1"
 
+[[deps.ResourceContexts]]
+deps = ["Logging"]
+git-tree-sha1 = "0e9863272a09aff6579a987dd7fe3f94e32f6673"
+uuid = "8d208092-d35c-4dd3-a0d7-8325f9cce6b4"
+version = "0.2.0"
+
 [[deps.ReverseDiff]]
 deps = ["ChainRulesCore", "DiffResults", "DiffRules", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "SpecialFunctions", "StaticArrays", "Statistics"]
-git-tree-sha1 = "afc870db2b2c2df1ba3f7b199278bb071e4f6f90"
+git-tree-sha1 = "a8d90f5bf4880df810a13269eb5e3e29f22cbd96"
 uuid = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
-version = "1.14.4"
+version = "1.14.5"
 
 [[deps.Rmath]]
 deps = ["Random", "Rmath_jll"]
@@ -2062,10 +2300,10 @@ uuid = "ce78b400-467f-4804-87d8-8f486da07d0a"
 version = "1.1.0"
 
 [[deps.SimpleWeightedGraphs]]
-deps = ["Graphs", "LinearAlgebra", "Markdown", "SparseArrays", "Test"]
-git-tree-sha1 = "7d0b07df35fccf9b866a94bcab98822a87a3cb6f"
+deps = ["Graphs", "LinearAlgebra", "Markdown", "SparseArrays"]
+git-tree-sha1 = "4b33e0e081a825dbfaf314decf58fa47e53d6acb"
 uuid = "47aef6b3-ad0c-573a-a1e2-d07658019622"
-version = "1.3.0"
+version = "1.4.0"
 
 [[deps.SnoopPrecompile]]
 deps = ["Preferences"]
@@ -2075,6 +2313,12 @@ version = "1.0.3"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
+
+[[deps.SodiumSeal]]
+deps = ["Base64", "Libdl", "libsodium_jll"]
+git-tree-sha1 = "80cef67d2953e33935b41c6ab0a178b9987b1c99"
+uuid = "2133526b-2bfb-4018-ac12-889fb3908a75"
+version = "0.1.1"
 
 [[deps.SortingAlgorithms]]
 deps = ["DataStructures"]
@@ -2124,15 +2368,15 @@ version = "0.8.6"
 
 [[deps.StaticArrayInterface]]
 deps = ["ArrayInterface", "Compat", "IfElse", "LinearAlgebra", "Requires", "SnoopPrecompile", "SparseArrays", "Static", "SuiteSparse"]
-git-tree-sha1 = "fd5f417fd7e103c121b0a0b4a6902f03991111f4"
+git-tree-sha1 = "33040351d2403b84afce74dae2e22d3f5b18edcb"
 uuid = "0d7ed370-da01-4f52-bd93-41d350b8b718"
-version = "1.3.0"
+version = "1.4.0"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
-git-tree-sha1 = "63e84b7fdf5021026d0f17f76af7c57772313d99"
+git-tree-sha1 = "c262c8e978048c2b095be1672c9bee55b4619521"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.5.21"
+version = "1.5.24"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "6b7ba252635a5eff6a0b0664a41ee140a1c9e72a"
@@ -2175,9 +2419,9 @@ version = "6.60.0"
 
 [[deps.StrideArraysCore]]
 deps = ["ArrayInterface", "CloseOpenIntervals", "IfElse", "LayoutPointers", "ManualMemory", "SIMDTypes", "Static", "StaticArrayInterface", "ThreadingUtilities"]
-git-tree-sha1 = "e2d60a1cd52d0583471f83bd5d2dcefa626d271f"
+git-tree-sha1 = "b3e9c174a9df77ed7b66fc0aa605def3351a0653"
 uuid = "7792a7ef-975c-4747-a70f-980b88e8d1da"
-version = "0.4.10"
+version = "0.4.13"
 
 [[deps.Strided]]
 deps = ["LinearAlgebra", "TupleTools"]
@@ -2276,15 +2520,15 @@ version = "0.5.1"
 
 [[deps.TimerOutputs]]
 deps = ["ExprTools", "Printf"]
-git-tree-sha1 = "f2fd3f288dfc6f507b0c3a2eb3bac009251e548b"
+git-tree-sha1 = "f548a9e9c490030e545f72074a41edfd0e5bcdd7"
 uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
-version = "0.5.22"
+version = "0.5.23"
 
 [[deps.Tracker]]
-deps = ["Adapt", "DiffRules", "ForwardDiff", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NNlib", "NaNMath", "Printf", "Random", "Requires", "SpecialFunctions", "Statistics"]
-git-tree-sha1 = "0874c1b5de1b5529b776cfeca3ec0acfada97b1b"
+deps = ["Adapt", "DiffRules", "ForwardDiff", "Functors", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NNlib", "NaNMath", "Optimisers", "Printf", "Random", "Requires", "SpecialFunctions", "Statistics"]
+git-tree-sha1 = "eee09af86d519b1f9bf76126de77e2c8716b1c72"
 uuid = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
-version = "0.2.20"
+version = "0.2.24"
 
 [[deps.TranscodingStreams]]
 deps = ["Random", "Test"]
@@ -2361,6 +2605,17 @@ git-tree-sha1 = "ee46863309f8f942249e1df1b74ba3088ff0f151"
 uuid = "cbff2730-442d-58d7-89d1-8e530c41eb02"
 version = "0.4.4"
 
+[[deps.UnsafeAtomics]]
+git-tree-sha1 = "6331ac3440856ea1988316b46045303bef658278"
+uuid = "013be700-e6cd-48c3-b4a1-df204f14c38f"
+version = "0.2.1"
+
+[[deps.UnsafeAtomicsLLVM]]
+deps = ["LLVM", "UnsafeAtomics"]
+git-tree-sha1 = "ead6292c02aab389cb29fe64cc9375765ab1e219"
+uuid = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
+version = "0.1.1"
+
 [[deps.UnsafePointers]]
 git-tree-sha1 = "c81331b3b2e60a982be57c046ec91f599ede674a"
 uuid = "e17b2a0c-0bdf-430a-bd0c-3a23cae4ff39"
@@ -2406,6 +2661,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "93c41695bc1c08c46c5899f4fe06d6ead504bb73"
 uuid = "02c8fc9c-b97f-50b9-bbe4-9be30ff0a78a"
 version = "2.10.3+0"
+
+[[deps.XMLDict]]
+deps = ["EzXML", "IterTools", "OrderedCollections"]
+git-tree-sha1 = "d9a3faf078210e477b291c79117676fca54da9dd"
+uuid = "228000da-037f-5747-90a9-8195ccbf91a5"
+version = "0.4.1"
 
 [[deps.XSLT_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libgcrypt_jll", "Libgpg_error_jll", "Libiconv_jll", "Pkg", "XML2_jll", "Zlib_jll"]
@@ -2463,9 +2724,9 @@ version = "1.4.0+3"
 
 [[deps.Xtals]]
 deps = ["AtomsBase", "Bio3DView", "CSV", "DataFrames", "Graphs", "JLD2", "LinearAlgebra", "MetaGraphs", "PeriodicTable", "PrecompileSignatures", "Printf", "StaticArrays", "Unitful"]
-git-tree-sha1 = "d69026aafd0b8924b0aca2115a3b97af69eb6a56"
+git-tree-sha1 = "21e6b308f424ab9962cd5456448be36bdea831e1"
 uuid = "ede5f01d-793e-4c47-9885-c447d1f18d6d"
-version = "0.4.12"
+version = "0.4.13"
 
 [[deps.YAML]]
 deps = ["Base64", "Dates", "Printf", "StringEncodings"]
@@ -2531,6 +2792,12 @@ git-tree-sha1 = "94d180a6d2b5e55e447e2d27a29ed04fe79eb30c"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
 version = "1.6.38+0"
 
+[[deps.libsodium_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "848ab3d00fe39d6fbc2a8641048f8f272af1c51e"
+uuid = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
+version = "1.0.20+0"
+
 [[deps.micromamba_jll]]
 deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
 git-tree-sha1 = "087555b0405ed6adf526cef22b6931606b5af8ac"
@@ -2552,6 +2819,7 @@ version = "17.4.0+0"
 # ╟─95450e24-a1a3-11ed-2b36-c9ef4bfe3dd0
 # ╠═03e3c34f-f43e-4bf8-bc39-c66dd9059c0e
 # ╟─76cb16d4-61eb-4db4-8574-247078043ba1
+# ╠═10a99c8e-2ef5-43f7-a82f-0f7dc30e2d6d
 # ╟─a55e9ca6-0396-4dc1-afd8-379dc03063fe
 # ╠═a41c48b6-3a4c-4bf5-9cfd-81388424a20d
 # ╠═5b68df70-f055-4069-a35b-c173870e984e
@@ -2559,7 +2827,7 @@ version = "17.4.0+0"
 # ╠═10d1afae-6bf4-4914-bfaa-43f02e956c4b
 # ╟─f7a6ae01-2e6d-4c16-aaf8-9af17a0e59e8
 # ╟─578e1a80-9499-42db-8ed3-da1e0713e604
-# ╟─c20fb391-1765-4b29-9eb8-7f2c8f4351bf
+# ╠═c20fb391-1765-4b29-9eb8-7f2c8f4351bf
 # ╟─7e3ad6e5-323b-4e29-ba58-6c243a416ea9
 # ╟─660b7b62-8edf-4bdc-9d6c-c1b46002590c
 # ╠═a55da127-e349-42fe-9280-e1c868c025f7
@@ -2573,9 +2841,18 @@ version = "17.4.0+0"
 # ╠═b73dc3d3-ee38-46c7-a268-e47c0d692c9a
 # ╠═87aedd6e-9af1-442d-93bd-6b1a45838315
 # ╠═bef802d7-9715-4c11-bb73-de2949cbc0fc
-# ╠═fc4625bb-9b16-4fc8-8b8e-175758115aeb
-# ╠═175f5541-1929-4d2f-aca0-82be15890738
-# ╠═4b5da3b1-3c13-43ac-bb3f-952420f450d1
+# ╟─fc4625bb-9b16-4fc8-8b8e-175758115aeb
+# ╠═17ab9f6e-abde-453e-aace-b3694eb31f64
+# ╟─4bdcc41b-083a-4687-aee5-bbc23f94363b
+# ╠═5603bf38-7e37-4372-a6c1-7c8f6dd472a0
+# ╟─7b6424a4-fdec-470d-9483-75a2f323d16d
+# ╠═19812716-75a9-4e9d-9254-c4629842430e
+# ╟─658a48c2-8409-4128-88e5-b974fe30701b
+# ╟─f995ee00-d7c0-477a-8237-f9ddc1209468
+# ╠═dd814c0a-e9d5-4749-bf8a-cb25cd7b0cab
+# ╟─4d7c27c9-6540-4165-8fea-fbae95cdcca4
+# ╠═a7260180-244c-4600-bd89-72e7bc857544
+# ╟─2b5b1ef3-a782-43d5-9f16-20bc8303d67a
 # ╟─78791a9e-9537-4d66-9609-d470c90c675e
 # ╠═d2d30fca-8914-4853-ba20-32f50244be01
 # ╟─26ac75f4-bab7-47e7-aad9-c6fa9e031737
@@ -2591,14 +2868,30 @@ version = "17.4.0+0"
 # ╟─f99a0111-1348-4c12-8bc7-ac02ea4cee21
 # ╠═ad0ea23c-512c-482b-ab02-59397fe3a9ab
 # ╟─6bf7dd34-d1f3-4145-ac95-069886c8a850
-# ╠═3bedaca0-d74b-4fa2-b910-593c8603ee33
+# ╟─3bedaca0-d74b-4fa2-b910-593c8603ee33
 # ╠═15d31f64-8d36-4b85-bb11-cd80b111b781
+# ╟─9dbff198-c067-4252-9673-450844810116
 # ╠═66af0ad2-aea8-4416-8627-c0f29384c7da
-# ╠═c0241b9c-77d1-47a0-9eb5-d65e7036e69c
-# ╠═41ffa75e-c0cb-4d76-803f-48553db8f626
+# ╟─c0241b9c-77d1-47a0-9eb5-d65e7036e69c
+# ╠═53f83fcb-50e7-4d32-ab69-56fe4e54f425
+# ╟─2d0393dc-8083-4fe9-9d5f-e9cd76af243f
+# ╠═8d619f4c-beea-4917-8f71-49dd7bc82501
+# ╟─c81bd54d-c1de-44a5-b586-601310463be4
+# ╠═82bad2b4-4598-436e-811b-fb19c9a69c9f
+# ╟─def924ff-4e46-4670-9f4b-112a1bf243d1
+# ╠═4f860da9-22d2-4e4b-8fa5-e9f9797039cb
+# ╟─5e374c75-5fc1-4407-a667-33b1e79553a3
+# ╠═bc5bc9a7-3e5a-47bb-bd86-bac74208df39
+# ╠═e7a82f17-ed97-48e2-a8f4-95cb6b65a7ce
+# ╟─92ef3b47-c050-4a1b-bebf-11d09be0665a
+# ╠═e6bc074f-f68f-4285-b058-7e2f6c665663
+# ╟─2d5a6b65-7703-4d31-8eb7-e7ef90460f65
 # ╠═58656c12-d6b3-42bb-ba58-f1d283f98614
-# ╠═04106bba-7302-4e93-aecd-73a14d0aea03
-# ╠═3fab6bb3-e923-40e5-9ff9-438564462161
+# ╟─04106bba-7302-4e93-aecd-73a14d0aea03
+# ╠═98bd6bea-9d2e-48c3-843b-e29e860fe5ae
+# ╠═32df46cc-4131-40bc-a1e0-1b46a5dcb01c
+# ╟─9e640d76-eaa5-45fe-b2d4-f6ee5483dfed
+# ╠═89a79d36-d201-43f1-8a56-c66457cc4848
 # ╟─c280f1b3-ad5e-4023-ab97-7e8f7f0b1c3b
 # ╠═7234d025-4a70-4d55-a199-1c26c45ddd23
 # ╠═b22e0107-c5fc-43e1-bcb3-cd39a66b0732
@@ -2614,7 +2907,7 @@ version = "17.4.0+0"
 # ╠═783d0cea-fa78-4e03-900d-63b2cfe72a9f
 # ╠═1744c053-a7be-47b3-a43e-ba892f47a11f
 # ╟─1d199188-384a-4836-a051-b93b7d75ca86
-# ╠═62b1cea7-2727-410a-b814-e003afad56b6
+# ╠═43609597-d5e3-454b-af6b-abb7f01a91ea
 # ╠═0adcca11-bbca-42ca-ba38-3e7ffee703cc
 # ╟─60394155-ba71-450e-93b2-8123b487561d
 # ╠═c5ca6518-a34b-4990-aca7-6e2ff157eb5a
